@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 # Version of this release. Bump on every release - deployed stations compare
 # against the copy on the office share (settings: updateSource) and offer to
 # self-update when the shared copy is newer.
-$script:AppVersion = '2.3.6'
+$script:AppVersion = '2.3.7'
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -767,7 +767,7 @@ $pnlStatus = New-Object System.Windows.Forms.Panel
 $pnlStatus.Location = New-Object System.Drawing.Point(16, 76)
 $pnlStatus.Size = New-Object System.Drawing.Size(712, 52)
 $pnlStatus.Anchor = 'Top,Left,Right'
-$pnlStatus.BackColor = [System.Drawing.Color]::FromArgb(241,243,245)
+$pnlStatus.BackColor = [System.Drawing.Color]::FromArgb(224,240,224)
 
 $lblStatusMain = New-Object System.Windows.Forms.Label
 $lblStatusMain.Font = New-Object System.Drawing.Font('Segoe UI', 14, [System.Drawing.FontStyle]::Bold)
@@ -775,7 +775,7 @@ $lblStatusMain.Location = New-Object System.Drawing.Point(10, 3)
 $lblStatusMain.Size = New-Object System.Drawing.Size(694, 28)
 $lblStatusMain.Anchor = 'Top,Left,Right'
 $lblStatusMain.BackColor = [System.Drawing.Color]::Transparent
-$lblStatusMain.ForeColor = [System.Drawing.Color]::FromArgb(68,68,68)
+$lblStatusMain.ForeColor = [System.Drawing.Color]::FromArgb(19,115,51)
 
 $lblStatusSub = New-Object System.Windows.Forms.Label
 $lblStatusSub.Font = New-Object System.Drawing.Font('Segoe UI', 8.5)
@@ -1002,7 +1002,7 @@ function Set-Status([string]$text, [string]$kind, [string]$sub = '') {
         'info'  { $bg = [System.Drawing.Color]::FromArgb(222,236,252); $fg = [System.Drawing.Color]::FromArgb(11,92,173) }
         'warn'  { $bg = [System.Drawing.Color]::FromArgb(254,243,224); $fg = [System.Drawing.Color]::FromArgb(160,98,0) }
         'error' { $bg = [System.Drawing.Color]::FromArgb(250,228,228); $fg = [System.Drawing.Color]::FromArgb(180,30,30) }
-        default { $bg = [System.Drawing.Color]::FromArgb(241,243,245); $fg = [System.Drawing.Color]::FromArgb(68,68,68) }
+        default { $bg = [System.Drawing.Color]::FromArgb(224,240,224); $fg = [System.Drawing.Color]::FromArgb(19,115,51) }  # ready = green
     }
     $pnlStatus.BackColor = $bg
     $lblStatusMain.ForeColor = $fg
