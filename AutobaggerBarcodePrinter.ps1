@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 # Version of this release. Bump on every release - deployed stations compare
 # against the copy on the office share (settings: updateSource) and offer to
 # self-update when the shared copy is newer.
-$script:AppVersion = '2.3.1'
+$script:AppVersion = '2.3.2'
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -641,6 +641,9 @@ $script:Strings = @{
         spoolCanceled  = 'Spooler restart canceled (admin approval declined).'
         todayBar       = 'Labels printed today:  {0}'
         updateLink     = 'New version {0} - click here to update'
+        updTooltip     = 'Check for updates'
+        updUpToDate    = 'Up to date - v{0} is the latest version.'
+        updNoServer    = 'Could not check for updates - no connection to the release server.'
     }
     es = @{
         scanCap        = 'ESCANEE EL CÓDIGO QR  (o escriba el SKU / código y presione Enter)'
@@ -685,6 +688,9 @@ $script:Strings = @{
         spoolCanceled  = 'Reinicio cancelado (no se aprobó el permiso de administrador).'
         todayBar       = 'Etiquetas impresas hoy:  {0}'
         updateLink     = 'Nueva versión {0} - clic aquí para actualizar'
+        updTooltip     = 'Buscar actualización'
+        updUpToDate    = 'Actualizado - v{0} es la última versión.'
+        updNoServer    = 'No se pudo buscar actualizaciones - sin conexión al servidor.'
     }
 }
 function T([string]$key) {
@@ -697,7 +703,8 @@ $emojiPrinter = [char]::ConvertFromUtf32(0x1F5A8) + [char]0xFE0F   # printer
 $emojiBroom   = [char]::ConvertFromUtf32(0x1F9F9)                  # broom
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "$($script:AppName)   v$($script:AppVersion)"
+$script:ModDate = try { (Get-Item $PSCommandPath).LastWriteTime.ToString('M/d/yyyy') } catch { '' }
+$form.Text = "$($script:AppName)   v$($script:AppVersion)" + $(if ($script:ModDate) { "   -   $script:ModDate" })
 $form.Size = New-Object System.Drawing.Size(760, 680)
 $form.MinimumSize = New-Object System.Drawing.Size(700, 584)
 $form.StartPosition = 'CenterScreen'
@@ -712,6 +719,18 @@ $lblScan = New-Object System.Windows.Forms.Label
 $lblScan.Location = New-Object System.Drawing.Point(16, 12)
 $lblScan.AutoSize = $true
 $lblScan.ForeColor = [System.Drawing.Color]::FromArgb(60,60,60)
+
+$btnUpdate = New-Object System.Windows.Forms.Button
+$btnUpdate.Text = [char]::ConvertFromUtf32(0x2B06)   # up arrow: check for updates
+$btnUpdate.Location = New-Object System.Drawing.Point(600, 5)
+$btnUpdate.Size = New-Object System.Drawing.Size(28, 24)
+$btnUpdate.FlatStyle = 'Flat'
+$btnUpdate.FlatAppearance.BorderColor = [System.Drawing.Color]::Silver
+$btnUpdate.BackColor = [System.Drawing.Color]::White
+$btnUpdate.ForeColor = [System.Drawing.Color]::FromArgb(11,92,173)
+$btnUpdate.Font = New-Object System.Drawing.Font('Segoe UI Emoji', 9)
+$btnUpdate.Anchor = 'Top,Right'
+$script:Tip = New-Object System.Windows.Forms.ToolTip
 
 $btnLang = New-Object System.Windows.Forms.Button
 $btnLang.Location = New-Object System.Drawing.Point(634, 5)
@@ -924,7 +943,7 @@ function Bump-TodayCount {
 }
 Update-TodayBar
 
-$form.Controls.AddRange(@($lblScan, $btnLang, $txtScan, $pnlStatus, $lblInfo, $pic, $grp, $lblHist, $btnSpooler, $lv, $statusStrip))
+$form.Controls.AddRange(@($lblScan, $btnUpdate, $btnLang, $txtScan, $pnlStatus, $lblInfo, $pic, $grp, $lblHist, $btnSpooler, $lv, $statusStrip))
 
 $script:HistActive = $false   # true while the top row belongs to the queued product
 
@@ -1115,6 +1134,7 @@ if ([string]"$($settings.sqlConn)" -eq '' -and -not $SmokeTest) {
 # --- language toggle ---
 function Apply-Language {
     $btnLang.Text = if ($script:Lang -eq 'en') { 'Español' } else { 'English' }
+    $script:Tip.SetToolTip($btnUpdate, (T 'updTooltip'))
     $lblScan.Text = T 'scanCap'
     $grp.Text = T 'grpPrinting'
     $lblPrinter.Text = T 'sendTo'
@@ -1158,7 +1178,7 @@ function Invoke-SelfUpdate([string]$remotePath) {
     }
 }
 
-function Check-ForUpdate([switch]$Silent) {
+function Check-ForUpdate([switch]$Silent, [switch]$Interactive) {
     # web release page first, LAN share as fallback
     $info = $null
     $url = [string]$settings.updateSourceUrl
@@ -1168,7 +1188,20 @@ function Check-ForUpdate([switch]$Silent) {
         $src = [string]$settings.updateSource
         if ($src -ne '' -and $src -ine $PSCommandPath) { $info = Get-RemoteReleaseInfo $src }
     }
-    if (-not $info -or $info.Version -le [version]$script:AppVersion) { return }
+    if (-not $info) {
+        if ($Interactive) {
+            [void][System.Windows.Forms.MessageBox]::Show($form, (T 'updNoServer'), $script:AppName,
+                [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
+        }
+        return
+    }
+    if ($info.Version -le [version]$script:AppVersion) {
+        if ($Interactive) {
+            [void][System.Windows.Forms.MessageBox]::Show($form, ((T 'updUpToDate') -f $script:AppVersion), $script:AppName,
+                [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+        }
+        return
+    }
     $rv = $info.Version
     $sbUpdate.Text = (T 'updateLink') -f $rv
     if ($Silent -or $script:UpdatePromptedFor -eq "$rv") { return }
@@ -1181,7 +1214,12 @@ function Check-ForUpdate([switch]$Silent) {
 
 $sbUpdate.add_Click({
     $script:UpdatePromptedFor = ''   # re-prompt even if declined before
-    Check-ForUpdate
+    Check-ForUpdate -Interactive
+})
+$btnUpdate.add_Click({
+    $script:UpdatePromptedFor = ''
+    Check-ForUpdate -Interactive
+    $txtScan.Focus()
 })
 
 # check shortly after launch (so startup is never delayed), then every 4 hours
