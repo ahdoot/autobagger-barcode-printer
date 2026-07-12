@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 # Version of this release. Bump on every release - deployed stations compare
 # against the copy on the office share (settings: updateSource) and offer to
 # self-update when the shared copy is newer.
-$script:AppVersion = '2.3.5'
+$script:AppVersion = '2.3.6'
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -105,7 +105,7 @@ $script:LogFile    = Join-Path $script:AppDir 'print-log.csv'
 if (-not (Test-Path $script:AppDir)) { New-Item -ItemType Directory -Path $script:AppDir -Force | Out-Null }
 
 $script:DefaultSettings = [ordered]@{
-    settingsVersion = 3            # bumped when defaults change (see migration below)
+    settingsVersion = 4            # bumped when defaults change (see migration below)
     printerName    = ''            # last selected printer
     paperWidthIn   = 4.0           # paper sent to the printer driver (4x2 thermal labels)
     paperHeightIn  = 2.0
@@ -118,7 +118,9 @@ $script:DefaultSettings = [ordered]@{
     # (the app asks for it on first run if missing).
     sqlConn        = ''
     updateSource   = '\\PC1-AMD\Autobagger Barcode Printer\AutobaggerBarcodePrinter.ps1'  # LAN fallback release source
-    updateSourceUrl= 'https://raw.githubusercontent.com/ahdoot/autobagger-barcode-printer/main/AutobaggerBarcodePrinter.ps1'
+    # GitHub API endpoint (no CDN cache - new releases visible immediately;
+    # the raw.githubusercontent URL lags ~5 min behind a push)
+    updateSourceUrl= 'https://api.github.com/repos/ahdoot/autobagger-barcode-printer/contents/AutobaggerBarcodePrinter.ps1'
     language       = 'en'          # 'en' or 'es' (toggle in the GUI)
 }
 
@@ -140,7 +142,12 @@ function Get-RemoteReleaseInfo([string]$src) {
         try {
             [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072  # TLS 1.2
             $tmp = Join-Path $env:TEMP 'abp-release-download.tmp'
-            Invoke-WebRequest -Uri $src -OutFile $tmp -UseBasicParsing -TimeoutSec 25 | Out-Null
+            $headers = @{}
+            if ($src -match 'api\.github\.com') {
+                # ask the API for the raw file (fresh, not CDN-cached)
+                $headers = @{ Accept = 'application/vnd.github.raw'; 'User-Agent' = 'AutobaggerBarcodePrinter' }
+            }
+            Invoke-WebRequest -Uri $src -OutFile $tmp -UseBasicParsing -TimeoutSec 25 -Headers $headers | Out-Null
             $raw = [System.IO.File]::ReadAllText($tmp)
             $ps1 = Join-Path $env:TEMP 'abp-release.ps1'
             if ($raw -match '(?s)ABP-RELEASE-BEGIN:v(?<v>[0-9][0-9.]*):(?<b64>[A-Za-z0-9+/=\r\n\s]+?):ABP-RELEASE-END') {
@@ -182,6 +189,12 @@ function Load-Settings {
                 $s.labelWidthIn = 3.8; $s.labelHeightIn = 1.8
             }
             $s.settingsVersion = 3
+            Save-Settings $s
+        }
+        # v4: saved raw-CDN update URL -> blank, so the API default takes over
+        if ($fileVersion -lt 4) {
+            if ("$($s.updateSourceUrl)" -like 'https://raw.githubusercontent.com/*') { $s.updateSourceUrl = '' }
+            $s.settingsVersion = 4
             Save-Settings $s
         }
     }
