@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 # Version of this release. Bump on every release - deployed stations compare
 # against the copy on the office share (settings: updateSource) and offer to
 # self-update when the shared copy is newer.
-$script:AppVersion = '2.3.3'
+$script:AppVersion = '2.3.4'
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -1136,7 +1136,12 @@ if ([string]"$($settings.sqlConn)" -eq '' -and -not $SmokeTest) {
 # --- language toggle ---
 function Apply-Language {
     $btnLang.Text = if ($script:Lang -eq 'en') { 'Español' } else { 'English' }
-    $script:Tip.SetToolTip($btnUpdate, (T 'updTooltip'))
+    if ("$($script:AvailableVersion)" -ne '') {
+        $script:Tip.SetToolTip($btnUpdate, ((T 'updateLink') -f $script:AvailableVersion))
+        $sbUpdate.Text = (T 'updateLink') -f $script:AvailableVersion
+    } else {
+        $script:Tip.SetToolTip($btnUpdate, (T 'updTooltip'))
+    }
     $lblScan.Text = T 'scanCap'
     $grp.Text = T 'grpPrinting'
     $lblPrinter.Text = T 'sendTo'
@@ -1166,7 +1171,23 @@ $btnLang.add_Click({
 Apply-Language
 
 # --- self-update: compare against the released copy on the office share ---
-$script:UpdatePromptedFor = ''
+$script:AvailableVersion = ''
+
+# non-intrusive hint: blue arrow button + status-bar link; never a popup
+function Set-UpdateHint([string]$ver) {
+    $script:AvailableVersion = $ver
+    if ($ver -ne '') {
+        $sbUpdate.Text = (T 'updateLink') -f $ver
+        $btnUpdate.BackColor = [System.Drawing.Color]::FromArgb(0,120,215)
+        $btnUpdate.ForeColor = [System.Drawing.Color]::White
+        $script:Tip.SetToolTip($btnUpdate, ((T 'updateLink') -f $ver))
+    } else {
+        $sbUpdate.Text = ''
+        $btnUpdate.BackColor = [System.Drawing.Color]::White
+        $btnUpdate.ForeColor = [System.Drawing.Color]::FromArgb(11,92,173)
+        $script:Tip.SetToolTip($btnUpdate, (T 'updTooltip'))
+    }
+}
 function Invoke-SelfUpdate([string]$remotePath) {
     try {
         Copy-Item -LiteralPath $remotePath -Destination $PSCommandPath -Force
@@ -1195,25 +1216,21 @@ function Check-ForUpdate([switch]$Silent, [switch]$Interactive) {
         return
     }
     if ($info.Version -le [version]$script:AppVersion) {
+        Set-UpdateHint ''
         if ($Interactive) { $script:Tip.Show(((T 'updUpToDate') -f $script:AppVersion), $btnUpdate, -160, 30, 3500) }
         return
     }
     $rv = $info.Version
-    $sbUpdate.Text = (T 'updateLink') -f $rv
-    if ($Silent -or $script:UpdatePromptedFor -eq "$rv") { return }
-    $script:UpdatePromptedFor = "$rv"
+    Set-UpdateHint "$rv"
+    if (-not $Interactive) { return }   # timer/startup: hint only, never interrupt
     $ans = [System.Windows.Forms.MessageBox]::Show($form,
         "A new version of $($script:AppName) is available.`n`nYou have:   v$($script:AppVersion)`nAvailable:  v$rv`n`nDownload and update now? (takes a few seconds, the app restarts)",
         'Update available', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Information)
     if ($ans -eq [System.Windows.Forms.DialogResult]::Yes) { Invoke-SelfUpdate $info.File }
 }
 
-$sbUpdate.add_Click({
-    $script:UpdatePromptedFor = ''   # re-prompt even if declined before
-    Check-ForUpdate -Interactive
-})
+$sbUpdate.add_Click({ Check-ForUpdate -Interactive })
 $btnUpdate.add_Click({
-    $script:UpdatePromptedFor = ''
     Check-ForUpdate -Interactive
     $txtScan.Focus()
 })
