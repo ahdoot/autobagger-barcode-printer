@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 # Version of this release. Bump on every release - deployed stations compare
 # against the copy on the office share (settings: updateSource) and offer to
 # self-update when the shared copy is newer.
-$script:AppVersion = '2.3.2'
+$script:AppVersion = '2.3.3'
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -722,7 +722,7 @@ $lblScan.ForeColor = [System.Drawing.Color]::FromArgb(60,60,60)
 
 $btnUpdate = New-Object System.Windows.Forms.Button
 $btnUpdate.Text = [char]::ConvertFromUtf32(0x2B06)   # up arrow: check for updates
-$btnUpdate.Location = New-Object System.Drawing.Point(600, 5)
+$btnUpdate.Location = New-Object System.Drawing.Point(700, 5)
 $btnUpdate.Size = New-Object System.Drawing.Size(28, 24)
 $btnUpdate.FlatStyle = 'Flat'
 $btnUpdate.FlatAppearance.BorderColor = [System.Drawing.Color]::Silver
@@ -733,7 +733,7 @@ $btnUpdate.Anchor = 'Top,Right'
 $script:Tip = New-Object System.Windows.Forms.ToolTip
 
 $btnLang = New-Object System.Windows.Forms.Button
-$btnLang.Location = New-Object System.Drawing.Point(634, 5)
+$btnLang.Location = New-Object System.Drawing.Point(598, 5)
 $btnLang.Size = New-Object System.Drawing.Size(94, 24)
 $btnLang.FlatStyle = 'Flat'
 $btnLang.FlatAppearance.BorderColor = [System.Drawing.Color]::Silver
@@ -919,6 +919,8 @@ $lv.add_ClientSizeChanged({
 # --- bottom status bar: today's total + update link ---
 $statusStrip = New-Object System.Windows.Forms.StatusStrip
 $statusStrip.SizingGrip = $false
+$statusStrip.AutoSize = $false
+$statusStrip.Height = 28    # room for descenders at higher DPI scaling
 $sbToday = New-Object System.Windows.Forms.ToolStripStatusLabel
 $sbToday.Font = New-Object System.Drawing.Font('Segoe UI', 9.5, [System.Drawing.FontStyle]::Bold)
 $sbToday.Spring = $true
@@ -1189,17 +1191,11 @@ function Check-ForUpdate([switch]$Silent, [switch]$Interactive) {
         if ($src -ne '' -and $src -ine $PSCommandPath) { $info = Get-RemoteReleaseInfo $src }
     }
     if (-not $info) {
-        if ($Interactive) {
-            [void][System.Windows.Forms.MessageBox]::Show($form, (T 'updNoServer'), $script:AppName,
-                [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
-        }
+        if ($Interactive) { $script:Tip.Show((T 'updNoServer'), $btnUpdate, -220, 30, 3500) }  # fades by itself
         return
     }
     if ($info.Version -le [version]$script:AppVersion) {
-        if ($Interactive) {
-            [void][System.Windows.Forms.MessageBox]::Show($form, ((T 'updUpToDate') -f $script:AppVersion), $script:AppName,
-                [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
-        }
+        if ($Interactive) { $script:Tip.Show(((T 'updUpToDate') -f $script:AppVersion), $btnUpdate, -160, 30, 3500) }
         return
     }
     $rv = $info.Version
@@ -1239,7 +1235,17 @@ $form.add_KeyDown({
         if ($script:CurrentJob -and $btnPrint.Enabled) { Do-Print $script:CurrentJob }
     }
 })
-$form.add_Shown({ $txtScan.Focus() })
+$form.add_Shown({
+    $txtScan.Focus()
+    # snap the history list to whole rows so the last visible line isn't cut off
+    try {
+        if ($lv.Items.Count -gt 0) {
+            $r0 = $lv.GetItemRect(0)
+            $rows = [Math]::Max(2, [Math]::Floor(($lv.ClientSize.Height - $r0.Y) / $r0.Height))
+            $lv.Height = ($lv.Height - $lv.ClientSize.Height) + $r0.Y + ($rows * $r0.Height) + 2
+        }
+    } catch { }
+})
 # keep the scan box focused so wedge scans always land there
 $form.add_Click({ $txtScan.Focus() })
 
