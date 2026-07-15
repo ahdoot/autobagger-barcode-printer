@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 # Version of this release. Bump on every release - deployed stations compare
 # against the copy on the office share (settings: updateSource) and offer to
 # self-update when the shared copy is newer.
-$script:AppVersion = '2.4.3'
+$script:AppVersion = '2.5.0'
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -117,6 +117,11 @@ $script:DefaultSettings = [ordered]@{
     # once per station in %APPDATA%\AutobaggerBarcodePrinter\settings.json
     # (the app asks for it on first run if missing).
     sqlConn        = ''
+    # ShipHero API (click-to-zoom full-size photos): per-station refresh token,
+    # view:products scope only; access token cached+auto-refreshed below.
+    shRefreshToken = ''
+    shAccessToken  = ''
+    shAccessExp    = 0
     updateSource   = '\\PC1-AMD\Autobagger Barcode Printer\AutobaggerBarcodePrinter.ps1'  # LAN fallback release source
     # GitHub API endpoint (no CDN cache - new releases visible immediately;
     # the raw.githubusercontent URL lags ~5 min behind a push)
@@ -695,6 +700,8 @@ $script:Strings = @{
         phLoading      = 'LOADING PHOTO...'
         phFailed       = 'PHOTO DOWNLOAD FAILED'
         phSql          = 'SQL OFFLINE - NO PHOTO INFO'
+        zoomTip        = 'Click to enlarge'
+        zoomTokenPrompt= "One-time setup for full-size photos`n`nPaste the ShipHero photo token for this station (ask the admin).`nLeave empty to skip - zoom will show the small photo enlarged."
     }
     es = @{
         scanCap        = 'ESCANEE EL CÓDIGO QR  (o escriba el SKU / código y presione Enter)'
@@ -746,6 +753,8 @@ $script:Strings = @{
         phLoading      = 'CARGANDO FOTO...'
         phFailed       = 'FALLÓ LA DESCARGA DE LA FOTO'
         phSql          = 'SQL SIN CONEXIÓN - SIN INFO DE FOTO'
+        zoomTip        = 'Clic para ampliar'
+        zoomTokenPrompt= "Configuración única para fotos grandes`n`nPegue el token de fotos de ShipHero para esta estación (pida al administrador).`nDeje vacío para omitir - el zoom mostrará la foto pequeña ampliada."
     }
 }
 function T([string]$key) {
@@ -839,6 +848,7 @@ $picProduct.Size = New-Object System.Drawing.Size(148, 145)
 $picProduct.SizeMode = 'Zoom'
 $picProduct.BorderStyle = 'FixedSingle'
 $picProduct.BackColor = [System.Drawing.Color]::White
+$picProduct.Cursor = [System.Windows.Forms.Cursors]::Hand
 
 # state placeholders: each names WHY there is no photo (per language, tinted)
 function New-PlaceholderImage([string]$text, [string]$kind = 'none') {
@@ -1036,6 +1046,112 @@ function Bump-TodayCount {
 Update-TodayBar
 
 $form.Controls.AddRange(@($lblScan, $btnUpdate, $btnLang, $txtScan, $pnlStatus, $picProduct, $lblInfo, $pic, $grp, $lblHist, $btnSpooler, $lv, $statusStrip))
+
+# --- ShipHero API: access-token refresh + full-size photo fetch (click-to-zoom)
+$script:ShClientId = '7A64u5rLqB6lgadxI9Izs8IQ0ayqZQx4'
+function Get-ShAccessToken {
+    $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    if ("$($settings.shAccessToken)" -ne '' -and [double]$settings.shAccessExp -gt ($now + 600)) { return [string]$settings.shAccessToken }
+    if ("$($settings.shRefreshToken)" -eq '') { return '' }
+    try {
+        $resp = Invoke-RestMethod -Method Post -Uri 'https://login.shiphero.com/oauth/token' -TimeoutSec 25 `
+            -ContentType 'application/x-www-form-urlencoded' `
+            -Body @{ grant_type = 'refresh_token'; client_id = $script:ShClientId; refresh_token = $settings.shRefreshToken }
+        if ($resp.access_token) {
+            $settings.shAccessToken = [string]$resp.access_token
+            $settings.shAccessExp = $now + [int]$resp.expires_in
+            if ($resp.refresh_token) { $settings.shRefreshToken = [string]$resp.refresh_token }  # rotation-safe
+            Save-Settings $settings
+            return [string]$resp.access_token
+        }
+    } catch { }
+    return ''
+}
+
+# background: GraphQL for the product's original image -> download -> cache .full.img -> swap into open zoom
+function Fetch-FullImage($job) {
+    if ("$($settings.shRefreshToken)" -eq '') {
+        if (-not $script:ZoomTokenAsked) {
+            $script:ZoomTokenAsked = $true
+            Add-Type -AssemblyName Microsoft.VisualBasic
+            $tokIn = [Microsoft.VisualBasic.Interaction]::InputBox((T 'zoomTokenPrompt'), 'ShipHero photo token', '')
+            if ("$tokIn".Trim() -ne '') { $settings.shRefreshToken = "$tokIn".Trim(); Save-Settings $settings }
+        }
+        if ("$($settings.shRefreshToken)" -eq '') { return }
+    }
+    $tok = Get-ShAccessToken
+    if ($tok -eq '') { return }
+    $q = '{"query":"{ product(sku: \"' + ($job.Sku -replace '[\\"]', '') + '\") { data { images { src position } } } }"}'
+    $wc = New-Object System.Net.WebClient
+    $wc.Encoding = [System.Text.Encoding]::UTF8
+    $wc.Headers['Authorization'] = "Bearer $tok"
+    $wc.Headers['Content-Type'] = 'application/json'
+    $wc | Add-Member -NotePropertyName JobSku -NotePropertyValue ([string]$job.Sku)
+    $wc.add_UploadStringCompleted({
+        param($sender, $e)
+        try {
+            if (-not $e.Cancelled -and -not $e.Error) {
+                $r = $e.Result | ConvertFrom-Json
+                $imgs = @($r.data.product.data.images | Where-Object { "$($_.src)" -ne '' } | Sort-Object { [int]$_.position })
+                if ($imgs.Count -gt 0) {
+                    $wc2 = New-Object System.Net.WebClient
+                    $wc2 | Add-Member -NotePropertyName JobSku -NotePropertyValue ([string]$sender.JobSku)
+                    $wc2.add_DownloadDataCompleted({
+                        param($s2, $e2)
+                        try {
+                            if (-not $e2.Cancelled -and -not $e2.Error -and $e2.Result.Length -gt 500) {
+                                $safe2 = ($s2.JobSku -replace '[^\w\-\.]', '_')
+                                $ff = Join-Path $script:ImgCacheDir "$safe2.full.img"
+                                [System.IO.File]::WriteAllBytes($ff, $e2.Result)
+                                if ($script:ZoomSku -eq $s2.JobSku -and $script:ZoomPicBox) {
+                                    $msz = New-Object System.IO.MemoryStream(, $e2.Result)
+                                    $script:ZoomPicBox.Image = [System.Drawing.Image]::FromStream($msz)
+                                }
+                            }
+                        } catch { }
+                        try { $s2.Dispose() } catch { }
+                    })
+                    $wc2.DownloadDataAsync([Uri]([string]$imgs[0].src))
+                }
+            }
+        } catch { }
+        try { $sender.Dispose() } catch { }
+    })
+    $wc.UploadStringAsync([Uri]'https://public-api.shiphero.com/graphql', 'POST', $q)
+}
+
+# click-to-zoom window: shows best available image now, upgrades to full-res when it lands
+function Show-ZoomImage($job) {
+    $safe = ($job.Sku -replace '[^\w\-\.]', '_')
+    if ($safe -eq '') { return }
+    $full = Join-Path $script:ImgCacheDir "$safe.full.img"
+    $thumb = Join-Path $script:ImgCacheDir "$safe.img"
+    $src = if (Test-Path $full) { $full } elseif (Test-Path $thumb) { $thumb } else { $null }
+    if (-not $src) { return }
+    $ms = New-Object System.IO.MemoryStream(, [System.IO.File]::ReadAllBytes($src))
+    $img = [System.Drawing.Image]::FromStream($ms)
+
+    $script:ZoomSku = [string]$job.Sku
+    $wa = [System.Windows.Forms.Screen]::FromControl($form).WorkingArea
+    $side = [Math]::Min(680, [Math]::Min($wa.Width, $wa.Height) - 60)
+    $zf = New-Object System.Windows.Forms.Form
+    $zf.Text = "$($job.Sku)   -   $($job.Name)"
+    $zf.StartPosition = 'CenterScreen'
+    $zf.Size = New-Object System.Drawing.Size($side, $side)
+    $zf.KeyPreview = $true
+    $zp = New-Object System.Windows.Forms.PictureBox
+    $zp.Dock = 'Fill'
+    $zp.SizeMode = 'Zoom'
+    $zp.BackColor = [System.Drawing.Color]::White
+    $zp.Image = $img
+    $zf.Controls.Add($zp)
+    $script:ZoomPicBox = $zp
+    $zp.add_Click({ $this.FindForm().Close() })
+    $zf.add_KeyDown({ param($s, $e) if ($e.KeyCode -in 'Escape','Enter','Space') { $s.Close() } })
+    $zf.add_FormClosed({ $script:ZoomPicBox = $null; $script:ZoomSku = ''; $txtScan.Focus() })
+    if (-not (Test-Path $full)) { Fetch-FullImage $job }
+    $zf.Show($form)
+}
 
 # --- product photo loading: cache-first, then a parallel background download.
 # Never blocks scanning/printing; a stale download never overwrites a newer scan.
@@ -1243,6 +1359,7 @@ $txtScan.add_KeyDown({
 })
 
 $btnPrint.add_Click({ if ($script:CurrentJob) { Do-Print $script:CurrentJob }; $txtScan.Focus() })
+$picProduct.add_Click({ if ($script:CurrentJob -and $script:CurrentJob.CanPrint) { Show-ZoomImage $script:CurrentJob } })
 $cboPrinter.add_SelectedIndexChanged({ $settings.printerName = [string]$cboPrinter.SelectedItem; Save-Settings $settings; $txtScan.Focus() })
 # Clear all stuck print jobs and restart the Windows print spooler (elevated)
 function Clear-Spooler {
@@ -1289,6 +1406,7 @@ function Apply-Language {
     } else {
         $script:Tip.SetToolTip($btnUpdate, (T 'updTooltip'))
     }
+    $script:Tip.SetToolTip($picProduct, (T 'zoomTip'))
     $lblScan.Text = T 'scanCap'
     $grp.Text = T 'grpPrinting'
     $lblPrinter.Text = T 'sendTo'
@@ -1456,6 +1574,24 @@ if ($SmokeTest) {
     $script:PrintedCount = 2
     Update-CountDisplay $job
     Set-Status 'PRINTED 2 of 3  -  1 more, press Ctrl+P' 'info' "[$($job.Sku)]  $($job.Name)     ->  SATO CL4NX Plus (203 dpi)"
+    # verify click-to-zoom full-image fetch via ShipHero API (if token configured)
+    if ("$($settings.shRefreshToken)" -ne '') {
+        $ffull = Join-Path $script:ImgCacheDir '7199-205.full.img'
+        if (Test-Path $ffull) { Remove-Item $ffull -Force }
+        Fetch-FullImage $job
+        $deadline = (Get-Date).AddSeconds(25)
+        while (-not (Test-Path $ffull) -and (Get-Date) -lt $deadline) {
+            [System.Windows.Forms.Application]::DoEvents()
+            Start-Sleep -Milliseconds 250
+        }
+        if (Test-Path $ffull) {
+            Write-Host "ZOOMTEST: full image fetched via API, $((Get-Item $ffull).Length) bytes"
+        } else {
+            Write-Host 'ZOOMTEST: FAILED - no full image after 25s'
+        }
+    } else {
+        Write-Host 'ZOOMTEST: skipped (no ShipHero token configured)'
+    }
     # verify update detection against a fake newer release
     $fake = Join-Path $env:TEMP 'abp-fake-release.ps1'
     "`$script:AppVersion = '9.9.9'" | Set-Content $fake
