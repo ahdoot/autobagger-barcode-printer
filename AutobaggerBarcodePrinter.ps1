@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 # Version of this release. Bump on every release - deployed stations compare
 # against the copy on the office share (settings: updateSource) and offer to
 # self-update when the shared copy is newer.
-$script:AppVersion = '2.5.0'
+$script:AppVersion = '2.6.0'
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -92,6 +92,13 @@ public static class Code128B
                 widths.Add((int)w - (int)'0');
         return widths.ToArray();
     }
+}
+"@ -ErrorAction SilentlyContinue
+
+# borderless companion window that never steals keyboard focus from the scanner
+Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition @"
+public class NoActivateForm : System.Windows.Forms.Form {
+    protected override bool ShowWithoutActivation { get { return true; } }
 }
 "@ -ErrorAction SilentlyContinue
 
@@ -1069,8 +1076,9 @@ function Get-ShAccessToken {
 }
 
 # background: GraphQL for the product's original image -> download -> cache .full.img -> swap into open zoom
-function Fetch-FullImage($job) {
+function Fetch-FullImage($job, [switch]$NoPrompt) {
     if ("$($settings.shRefreshToken)" -eq '') {
+        if ($NoPrompt) { return }
         if (-not $script:ZoomTokenAsked) {
             $script:ZoomTokenAsked = $true
             Add-Type -AssemblyName Microsoft.VisualBasic
@@ -1107,6 +1115,7 @@ function Fetch-FullImage($job) {
                                     $msz = New-Object System.IO.MemoryStream(, $e2.Result)
                                     $script:ZoomPicBox.Image = [System.Drawing.Image]::FromStream($msz)
                                 }
+                                if ($script:ImgReqSku -eq $s2.JobSku) { Update-SideImageForCurrent }
                             }
                         } catch { }
                         try { $s2.Dispose() } catch { }
@@ -1153,6 +1162,64 @@ function Show-ZoomImage($job) {
     $zf.Show($form)
 }
 
+# --- side photo panel: fills the free desktop space LEFT of the main window ---
+$sideForm = New-Object NoActivateForm
+$sideForm.FormBorderStyle = 'None'
+$sideForm.ShowInTaskbar = $false
+$sideForm.StartPosition = 'Manual'
+$sideForm.BackColor = [System.Drawing.Color]::White
+$sideForm.Owner = $form
+$sidePanelBorder = New-Object System.Windows.Forms.Panel
+$sidePanelBorder.Dock = 'Fill'
+$sidePanelBorder.BorderStyle = 'FixedSingle'
+$sidePic = New-Object System.Windows.Forms.PictureBox
+$sidePic.Dock = 'Fill'
+$sidePic.SizeMode = 'Zoom'
+$sidePic.BackColor = [System.Drawing.Color]::White
+$sidePic.Cursor = [System.Windows.Forms.Cursors]::Hand
+$sidePanelBorder.Controls.Add($sidePic)
+$sideForm.Controls.Add($sidePanelBorder)
+$sidePic.add_Click({ if ($script:CurrentJob -and $script:CurrentJob.CanPrint) { Show-ZoomImage $script:CurrentJob } })
+$script:SidePic = $sidePic
+$script:SideHasImage = $false
+
+# place/size the panel into the gap left of the main window; hide if no room/image
+function Update-SidePanel {
+    try {
+        if ($form.WindowState -eq 'Minimized' -or -not $form.Visible) { if ($sideForm.Visible) { $sideForm.Hide() }; return }
+        $wa = [System.Windows.Forms.Screen]::FromControl($form).WorkingArea
+        $gap = $form.Left - $wa.Left - 14
+        if ($gap -lt 220 -or -not $script:SideHasImage) { if ($sideForm.Visible) { $sideForm.Hide() }; return }
+        $sideForm.SetBounds($wa.Left + 6, $form.Top, $gap, $form.Height)
+        if (-not $sideForm.Visible) { $sideForm.Show() }
+    } catch { }
+}
+
+# show the best cached image (full first, then thumbnail) for the current product
+function Update-SideImageForCurrent {
+    if (-not $script:SidePic) { return }
+    $script:SideHasImage = $false
+    $safe = ("$($script:ImgReqSku)" -replace '[^\w\-\.]', '_')
+    if ($safe -ne '') {
+        foreach ($cand in @("$safe.full.img", "$safe.img")) {
+            $p = Join-Path $script:ImgCacheDir $cand
+            if (Test-Path $p) {
+                try {
+                    $ms = New-Object System.IO.MemoryStream(, [System.IO.File]::ReadAllBytes($p))
+                    $old = $script:SidePic.Image
+                    $script:SidePic.Image = [System.Drawing.Image]::FromStream($ms)
+                    if ($old) { try { $old.Dispose() } catch { } }
+                    $script:SideHasImage = $true
+                    break
+                } catch { }
+            }
+        }
+    }
+    Update-SidePanel
+}
+$form.add_LocationChanged({ Update-SidePanel })
+$form.add_SizeChanged({ Update-SidePanel })
+
 # --- product photo loading: cache-first, then a parallel background download.
 # Never blocks scanning/printing; a stale download never overwrites a newer scan.
 function Set-ProductPhoto($img) {
@@ -1163,23 +1230,28 @@ function Set-ProductPhoto($img) {
 function Show-ProductImage($job) {
     $script:ImgReqSku = [string]$job.Sku
     $safe = ($job.Sku -replace '[^\w\-\.]', '_')
-    if ($safe -eq '') { Set-ProductPhoto (New-PlaceholderImage (T 'phNone')); return }
+    if ($safe -eq '') { Set-ProductPhoto (New-PlaceholderImage (T 'phNone')); Update-SideImageForCurrent; return }
+    # pre-fetch the full-size original in the background for the side panel/zoom
+    if (-not (Test-Path (Join-Path $script:ImgCacheDir "$safe.full.img")) -and $job.CanPrint) { Fetch-FullImage $job -NoPrompt }
     $cacheFile = Join-Path $script:ImgCacheDir "$safe.img"
     if (Test-Path $cacheFile) {
         try {
             $ms = New-Object System.IO.MemoryStream(, [System.IO.File]::ReadAllBytes($cacheFile))
             Set-ProductPhoto ([System.Drawing.Image]::FromStream($ms))
+            Update-SideImageForCurrent
             return
         } catch { }
     }
     if ($job.SqlStatus -like 'SQL offline*') {
         # no SQL -> we never learned whether this product has a photo
         Set-ProductPhoto (New-PlaceholderImage (T 'phSql') 'sql')
+        Update-SideImageForCurrent
         return
     }
     if ("$($job.ImageUrl)" -eq '') {
         # SQL answered: this product has no image in ShipHero
         Set-ProductPhoto (New-PlaceholderImage (T 'phNone'))
+        Update-SideImageForCurrent
         return
     }
     Set-ProductPhoto (New-PlaceholderImage (T 'phLoading') 'loading')
@@ -1195,6 +1267,7 @@ function Show-ProductImage($job) {
                     if ($script:ImgReqSku -eq $sender.JobSku) {
                         $ms2 = New-Object System.IO.MemoryStream(, $e.Result)
                         Set-ProductPhoto ([System.Drawing.Image]::FromStream($ms2))
+                        Update-SideImageForCurrent
                     }
                 } elseif ($script:ImgReqSku -eq $sender.JobSku) {
                     # URL exists but the download was blocked / failed
@@ -1574,6 +1647,21 @@ if ($SmokeTest) {
     $script:PrintedCount = 2
     Update-CountDisplay $job
     Set-Status 'PRINTED 2 of 3  -  1 more, press Ctrl+P' 'info' "[$($job.Sku)]  $($job.Name)     ->  SATO CL4NX Plus (203 dpi)"
+    # verify the side photo panel appears, sizes to the gap, and shows the image
+    $wa0 = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+    $form.Location = New-Object System.Drawing.Point(($wa0.Left + 600), ($wa0.Top + 20))
+    Update-SideImageForCurrent
+    if ($sideForm.Visible) {
+        $sb2 = New-Object System.Drawing.Bitmap($sideForm.Width, $sideForm.Height)
+        $sideForm.DrawToBitmap($sb2, (New-Object System.Drawing.Rectangle(0, 0, $sideForm.Width, $sideForm.Height)))
+        $sb2.Save((Join-Path $script:AppDir 'smoketest-side.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+        $sb2.Dispose()
+        Write-Host "SIDEPANEL: visible, bounds $($sideForm.Bounds)"
+    } else {
+        Write-Host "SIDEPANEL: hidden (gap=$($form.Left - $wa0.Left - 14), hasImage=$($script:SideHasImage))"
+    }
+    $form.Location = New-Object System.Drawing.Point(-3000, -3000)
+    Update-SidePanel
     # verify click-to-zoom full-image fetch via ShipHero API (if token configured)
     if ("$($settings.shRefreshToken)" -ne '') {
         $ffull = Join-Path $script:ImgCacheDir '7199-205.full.img'
