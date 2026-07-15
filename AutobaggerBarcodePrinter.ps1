@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 # Version of this release. Bump on every release - deployed stations compare
 # against the copy on the office share (settings: updateSource) and offer to
 # self-update when the shared copy is newer.
-$script:AppVersion = '2.6.1'
+$script:AppVersion = '2.6.2'
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -1612,10 +1612,14 @@ $form.add_Shown({
     # never taller than the screen's working area (small monitors / DPI scaling):
     # the anchored history list absorbs the shrink, status bar stays visible
     try {
-        $wa = [System.Windows.Forms.Screen]::FromControl($form).WorkingArea
-        if ($form.Height -gt $wa.Height) { $form.Height = $wa.Height }
-        if ($form.Bottom -gt $wa.Bottom) { $form.Top = [Math]::Max($wa.Top, $wa.Bottom - $form.Height) }
-        if ($form.Top -lt $wa.Top) { $form.Top = $wa.Top }
+        if (-not $SmokeTest) {
+            $wa = [System.Windows.Forms.Screen]::FromControl($form).WorkingArea
+            if ($form.Height -gt $wa.Height) { $form.Height = $wa.Height }
+            # dock to the RIGHT edge so the side photo panel gets all the free space
+            $form.Left = $wa.Right - $form.Width - 6
+            $form.Top  = [Math]::Max($wa.Top, $wa.Top + [int](($wa.Height - $form.Height) / 2))
+            if ($form.Bottom -gt $wa.Bottom) { $form.Top = [Math]::Max($wa.Top, $wa.Bottom - $form.Height) }
+        }
     } catch { }
     # snap the history list to whole rows so the last visible line isn't cut off
     try {
