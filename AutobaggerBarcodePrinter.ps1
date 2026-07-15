@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 # Version of this release. Bump on every release - deployed stations compare
 # against the copy on the office share (settings: updateSource) and offer to
 # self-update when the shared copy is newer.
-$script:AppVersion = '2.3.7'
+$script:AppVersion = '2.4.0'
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -309,7 +309,7 @@ function Lookup-Product($settings, [string]$barcode, [string]$sku) {
         $cmd = $conn.CreateCommand()
         $cmd.CommandTimeout = [int]$settings.sqlTimeoutSec
         $cmd.CommandText = @'
-SELECT TOP 5 p.sku, p.barcode, p.name, p.account_id, c.client_name, p.created_at
+SELECT TOP 5 p.sku, p.barcode, p.name, p.account_id, c.client_name, p.created_at, p.large_thumbnail
 FROM dbo.de_products p
 LEFT JOIN (
     SELECT customer_id, MAX(NULLIF(from_name,'')) AS client_name
@@ -327,10 +327,11 @@ ORDER BY CASE WHEN p.barcode = @barcode AND p.sku = @sku THEN 0
         $rows = @()
         while ($rd.Read()) {
             $rows += [pscustomobject]@{
-                Sku     = [string]$rd['sku']
-                Barcode = [string]$rd['barcode']
-                Name    = [string]$rd['name']
-                Client  = [string]$rd['client_name']
+                Sku      = [string]$rd['sku']
+                Barcode  = [string]$rd['barcode']
+                Name     = [string]$rd['name']
+                Client   = [string]$rd['client_name']
+                ImageUrl = [string]$rd['large_thumbnail']
             }
         }
         $rd.Close()
@@ -348,11 +349,13 @@ function Resolve-Job($settings, $job) {
     } catch {
         $job.SqlStatus = "SQL offline: $($_.Exception.Message)"
     }
+    $job.ImageUrl = ''
     if ($rows -and $rows.Count -gt 0) {
         $p = $rows[0]
         $job.Sku  = $p.Sku
         $job.Name = $p.Name
         $job.Client = $p.Client
+        $job.ImageUrl = [string]$p.ImageUrl
         if ($p.Barcode -ne '') { $job.Barcode = $p.Barcode } elseif ($job.Barcode -eq '') { $job.Barcode = $p.Sku }
         if ($rows.Count -gt 1) { $job.SqlStatus = "Note: $($rows.Count) products matched; using newest." }
     }
@@ -786,11 +789,34 @@ $lblStatusSub.BackColor = [System.Drawing.Color]::Transparent
 $lblStatusSub.ForeColor = [System.Drawing.Color]::FromArgb(120,120,120)
 $pnlStatus.Controls.AddRange(@($lblStatusMain, $lblStatusSub))
 
-# --- product info ---
+# --- product photo (left) + product info ---
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072  # TLS 1.2 for image/update fetches
+$script:ImgCacheDir = Join-Path $script:AppDir 'imgcache'
+if (-not (Test-Path $script:ImgCacheDir)) { New-Item -ItemType Directory -Path $script:ImgCacheDir -Force | Out-Null }
+
+$picProduct = New-Object System.Windows.Forms.PictureBox
+$picProduct.Location = New-Object System.Drawing.Point(16, 138)
+$picProduct.Size = New-Object System.Drawing.Size(148, 145)
+$picProduct.SizeMode = 'Zoom'
+$picProduct.BorderStyle = 'FixedSingle'
+$picProduct.BackColor = [System.Drawing.Color]::White
+
+# neutral placeholder (camera glyph), shown while loading / when no photo exists
+$script:NoPhotoImg = New-Object System.Drawing.Bitmap(148, 145)
+$gph = [System.Drawing.Graphics]::FromImage($script:NoPhotoImg)
+$gph.Clear([System.Drawing.Color]::FromArgb(246,247,249))
+$phFont = New-Object System.Drawing.Font('Segoe UI Emoji', 34)
+$phFmt = New-Object System.Drawing.StringFormat
+$phFmt.Alignment = 'Center'; $phFmt.LineAlignment = 'Center'
+$gph.DrawString([char]::ConvertFromUtf32(0x1F4F7), $phFont, [System.Drawing.Brushes]::Silver,
+    (New-Object System.Drawing.RectangleF(0, 0, 148, 145)), $phFmt)
+$gph.Dispose(); $phFont.Dispose(); $phFmt.Dispose()
+$picProduct.Image = $script:NoPhotoImg
+
 $lblInfo = New-Object System.Windows.Forms.Label
 $lblInfo.Text = ''
-$lblInfo.Location = New-Object System.Drawing.Point(16, 138)
-$lblInfo.Size = New-Object System.Drawing.Size(400, 104)
+$lblInfo.Location = New-Object System.Drawing.Point(176, 138)
+$lblInfo.Size = New-Object System.Drawing.Size(284, 145)
 $lblInfo.Font = New-Object System.Drawing.Font('Segoe UI', 10)
 
 # --- label preview ---
@@ -958,7 +984,49 @@ function Bump-TodayCount {
 }
 Update-TodayBar
 
-$form.Controls.AddRange(@($lblScan, $btnUpdate, $btnLang, $txtScan, $pnlStatus, $lblInfo, $pic, $grp, $lblHist, $btnSpooler, $lv, $statusStrip))
+$form.Controls.AddRange(@($lblScan, $btnUpdate, $btnLang, $txtScan, $pnlStatus, $picProduct, $lblInfo, $pic, $grp, $lblHist, $btnSpooler, $lv, $statusStrip))
+
+# --- product photo loading: cache-first, then a parallel background download.
+# Never blocks scanning/printing; a stale download never overwrites a newer scan.
+function Set-ProductPhoto($img) {
+    $old = $picProduct.Image
+    $picProduct.Image = $img
+    if ($old -and -not [object]::ReferenceEquals($old, $script:NoPhotoImg)) { try { $old.Dispose() } catch { } }
+}
+function Show-ProductImage($job) {
+    $script:ImgReqSku = [string]$job.Sku
+    $safe = ($job.Sku -replace '[^\w\-\.]', '_')
+    if ($safe -eq '') { Set-ProductPhoto $script:NoPhotoImg; return }
+    $cacheFile = Join-Path $script:ImgCacheDir "$safe.img"
+    if (Test-Path $cacheFile) {
+        try {
+            $ms = New-Object System.IO.MemoryStream(, [System.IO.File]::ReadAllBytes($cacheFile))
+            Set-ProductPhoto ([System.Drawing.Image]::FromStream($ms))
+            return
+        } catch { }
+    }
+    Set-ProductPhoto $script:NoPhotoImg
+    if ("$($job.ImageUrl)" -eq '') { return }
+    try {
+        $wc = New-Object System.Net.WebClient
+        $wc | Add-Member -NotePropertyName JobSku -NotePropertyValue ([string]$job.Sku)
+        $wc | Add-Member -NotePropertyName CacheFile -NotePropertyValue $cacheFile
+        $wc.add_DownloadDataCompleted({
+            param($sender, $e)
+            try {
+                if (-not $e.Cancelled -and -not $e.Error -and $e.Result.Length -gt 200) {
+                    [System.IO.File]::WriteAllBytes($sender.CacheFile, $e.Result)
+                    if ($script:ImgReqSku -eq $sender.JobSku) {
+                        $ms2 = New-Object System.IO.MemoryStream(, $e.Result)
+                        Set-ProductPhoto ([System.Drawing.Image]::FromStream($ms2))
+                    }
+                }
+            } catch { }
+            try { $sender.Dispose() } catch { }
+        })
+        $wc.DownloadDataAsync([Uri]$job.ImageUrl)
+    } catch { }
+}
 
 $script:HistActive = $false   # true while the top row belongs to the queued product
 
@@ -1084,6 +1152,7 @@ function Handle-Scan([string]$raw) {
     $script:HistActive = $false
     Update-CountDisplay $job
     Show-JobInfo $job
+    Show-ProductImage $job
     Update-Preview $job
 
     if (-not $job.CanPrint) {
@@ -1301,6 +1370,16 @@ if ($SmokeTest) {
     $script:CurrentJob = $job
     $lblInfo.Text = "Product:`n$($job.Name)`n`nSKU:  $($job.Sku)`nBarcode:  $($job.Barcode)`nClient:  $($job.Client)"
     Update-Preview $job
+    # seed a fake cached product photo to prove the photo pane renders
+    $tb = New-Object System.Drawing.Bitmap(300, 300)
+    $tg = [System.Drawing.Graphics]::FromImage($tb)
+    $tg.Clear([System.Drawing.Color]::FromArgb(70,105,140))
+    $tf = New-Object System.Drawing.Font('Segoe UI', 22, [System.Drawing.FontStyle]::Bold)
+    $tg.DrawString("JEANS`nPHOTO", $tf, [System.Drawing.Brushes]::White, 60, 100)
+    $tg.Dispose(); $tf.Dispose()
+    $tcache = Join-Path $script:ImgCacheDir '7199-205.img'
+    $tb.Save($tcache, [System.Drawing.Imaging.ImageFormat]::Png); $tb.Dispose()
+    Show-ProductImage $job
     $btnPrint.Enabled = $true
     $script:PrintedCount = 2
     Add-HistRow $job
