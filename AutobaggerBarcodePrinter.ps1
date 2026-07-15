@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 # Version of this release. Bump on every release - deployed stations compare
 # against the copy on the office share (settings: updateSource) and offer to
 # self-update when the shared copy is newer.
-$script:AppVersion = '2.4.0'
+$script:AppVersion = '2.4.1'
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -355,7 +355,9 @@ function Resolve-Job($settings, $job) {
         $job.Sku  = $p.Sku
         $job.Name = $p.Name
         $job.Client = $p.Client
-        $job.ImageUrl = [string]$p.ImageUrl
+        # ShipHero's S3 bucket denies public access, but the same files are
+        # served openly by their CloudFront CDN - swap the host.
+        $job.ImageUrl = [string]$p.ImageUrl -replace '^https?://shiphero-product-images\.s3\.amazonaws\.com/', 'https://d6rrc0vdsbu3f.cloudfront.net/'
         if ($p.Barcode -ne '') { $job.Barcode = $p.Barcode } elseif ($job.Barcode -eq '') { $job.Barcode = $p.Sku }
         if ($rows.Count -gt 1) { $job.SqlStatus = "Note: $($rows.Count) products matched; using newest." }
     }
@@ -591,6 +593,21 @@ if ($SelfTest -ne '') {
     if ($job.FromQR -and $job.Sku -eq '') { Write-Host 'ALERT: SKU MISSING - would show red popup, nothing queued'; exit 2 }
     $job = Resolve-Job $settings $job
     Write-Host ("RESOLVE: sku='{0}' barcode='{1}' name='{2}' client='{3}' canPrint={4} status='{5}'" -f $job.Sku, $job.Barcode, $job.Name, $job.Client, $job.CanPrint, $job.SqlStatus)
+    if ("$($job.ImageUrl)" -ne '') {
+        try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
+            $imgBytes = (New-Object System.Net.WebClient).DownloadData($job.ImageUrl)
+            $imgDir = Join-Path $script:AppDir 'imgcache'
+            if (-not (Test-Path $imgDir)) { New-Item -ItemType Directory -Path $imgDir -Force | Out-Null }
+            $imgFile = Join-Path $imgDir (($job.Sku -replace '[^\w\-\.]', '_') + '.img')
+            [System.IO.File]::WriteAllBytes($imgFile, $imgBytes)
+            Write-Host "IMAGE: fetched $($imgBytes.Length) bytes -> cached $imgFile"
+        } catch {
+            Write-Host "IMAGE: fetch failed - $($_.Exception.Message)"
+        }
+    } else {
+        Write-Host 'IMAGE: no image URL for this product'
+    }
     $bmp = Render-LabelBitmap $settings $job 203
     $png = Join-Path $script:AppDir 'selftest-label.png'
     $bmp.Save($png, [System.Drawing.Imaging.ImageFormat]::Png)
@@ -1370,15 +1387,17 @@ if ($SmokeTest) {
     $script:CurrentJob = $job
     $lblInfo.Text = "Product:`n$($job.Name)`n`nSKU:  $($job.Sku)`nBarcode:  $($job.Barcode)`nClient:  $($job.Client)"
     Update-Preview $job
-    # seed a fake cached product photo to prove the photo pane renders
-    $tb = New-Object System.Drawing.Bitmap(300, 300)
-    $tg = [System.Drawing.Graphics]::FromImage($tb)
-    $tg.Clear([System.Drawing.Color]::FromArgb(70,105,140))
-    $tf = New-Object System.Drawing.Font('Segoe UI', 22, [System.Drawing.FontStyle]::Bold)
-    $tg.DrawString("JEANS`nPHOTO", $tf, [System.Drawing.Brushes]::White, 60, 100)
-    $tg.Dispose(); $tf.Dispose()
+    # seed a fake cached product photo only if no real cached photo exists
     $tcache = Join-Path $script:ImgCacheDir '7199-205.img'
-    $tb.Save($tcache, [System.Drawing.Imaging.ImageFormat]::Png); $tb.Dispose()
+    if (-not (Test-Path $tcache)) {
+        $tb = New-Object System.Drawing.Bitmap(300, 300)
+        $tg = [System.Drawing.Graphics]::FromImage($tb)
+        $tg.Clear([System.Drawing.Color]::FromArgb(70,105,140))
+        $tf = New-Object System.Drawing.Font('Segoe UI', 22, [System.Drawing.FontStyle]::Bold)
+        $tg.DrawString("JEANS`nPHOTO", $tf, [System.Drawing.Brushes]::White, 60, 100)
+        $tg.Dispose(); $tf.Dispose()
+        $tb.Save($tcache, [System.Drawing.Imaging.ImageFormat]::Png); $tb.Dispose()
+    }
     Show-ProductImage $job
     $btnPrint.Enabled = $true
     $script:PrintedCount = 2
