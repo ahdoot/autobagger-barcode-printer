@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 # Version of this release. Bump on every release - deployed stations compare
 # against the copy on the office share (settings: updateSource) and offer to
 # self-update when the shared copy is newer.
-$script:AppVersion = '2.6.0'
+$script:AppVersion = '2.6.1'
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -1174,10 +1174,23 @@ $sidePanelBorder.Dock = 'Fill'
 $sidePanelBorder.BorderStyle = 'FixedSingle'
 $sidePic = New-Object System.Windows.Forms.PictureBox
 $sidePic.Dock = 'Fill'
-$sidePic.SizeMode = 'Zoom'
 $sidePic.BackColor = [System.Drawing.Color]::White
 $sidePic.Cursor = [System.Windows.Forms.Cursors]::Hand
 $sidePanelBorder.Controls.Add($sidePic)
+# cover-fit: scale the photo to FILL the whole panel (center-cropped), so the
+# entire free space is product image - click opens the uncropped zoom
+$sidePic.add_Paint({
+    param($s, $e)
+    $img = $script:SideImg
+    if (-not $img) { return }
+    $cw = $s.ClientSize.Width; $ch = $s.ClientSize.Height
+    if ($cw -le 1 -or $ch -le 1) { return }
+    $scale = [Math]::Max(($cw / $img.Width), ($ch / $img.Height))
+    $dw = $img.Width * $scale; $dh = $img.Height * $scale
+    $e.Graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $e.Graphics.DrawImage($img, [single](($cw - $dw) / 2), [single](($ch - $dh) / 2), [single]$dw, [single]$dh)
+})
+$sidePic.add_Resize({ $this.Invalidate() })
 $sideForm.Controls.Add($sidePanelBorder)
 $sidePic.add_Click({ if ($script:CurrentJob -and $script:CurrentJob.CanPrint) { Show-ZoomImage $script:CurrentJob } })
 $script:SidePic = $sidePic
@@ -1189,9 +1202,11 @@ function Update-SidePanel {
         if ($form.WindowState -eq 'Minimized' -or -not $form.Visible) { if ($sideForm.Visible) { $sideForm.Hide() }; return }
         $wa = [System.Windows.Forms.Screen]::FromControl($form).WorkingArea
         $gap = $form.Left - $wa.Left - 14
-        if ($gap -lt 220 -or -not $script:SideHasImage) { if ($sideForm.Visible) { $sideForm.Hide() }; return }
-        $sideForm.SetBounds($wa.Left + 6, $form.Top, $gap, $form.Height)
+        if ($gap -lt 180 -or -not $script:SideHasImage) { if ($sideForm.Visible) { $sideForm.Hide() }; return }
+        # claim the FULL working-area height, not just the app window's height
+        $sideForm.SetBounds($wa.Left + 6, ($wa.Top + 6), $gap, ($wa.Height - 12))
         if (-not $sideForm.Visible) { $sideForm.Show() }
+        $sidePic.Invalidate()
     } catch { }
 }
 
@@ -1206,8 +1221,8 @@ function Update-SideImageForCurrent {
             if (Test-Path $p) {
                 try {
                     $ms = New-Object System.IO.MemoryStream(, [System.IO.File]::ReadAllBytes($p))
-                    $old = $script:SidePic.Image
-                    $script:SidePic.Image = [System.Drawing.Image]::FromStream($ms)
+                    $old = $script:SideImg
+                    $script:SideImg = [System.Drawing.Image]::FromStream($ms)
                     if ($old) { try { $old.Dispose() } catch { } }
                     $script:SideHasImage = $true
                     break
@@ -1215,6 +1230,8 @@ function Update-SideImageForCurrent {
             }
         }
     }
+    if (-not $script:SideHasImage -and $script:SideImg) { try { $script:SideImg.Dispose() } catch { }; $script:SideImg = $null }
+    $script:SidePic.Invalidate()
     Update-SidePanel
 }
 $form.add_LocationChanged({ Update-SidePanel })
