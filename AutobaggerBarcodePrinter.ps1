@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 # Version of this release. Bump on every release - deployed stations compare
 # against the copy on the office share (settings: updateSource) and offer to
 # self-update when the shared copy is newer.
-$script:AppVersion = '2.4.1'
+$script:AppVersion = '2.4.2'
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -450,6 +450,13 @@ function Draw-Label([System.Drawing.Graphics]$g, [System.Drawing.RectangleF]$rc,
     $g.DrawString($digits, $fDig, $black, (New-Object System.Drawing.RectangleF($rc.X, ($y + $h + $barZ * 0.02), $rc.Width, ($barZ * 0.32))), $fmt)
     $fDig.Dispose()
 
+    # tiny print timestamp, bottom-right corner
+    $fmtBR = New-Object System.Drawing.StringFormat
+    $fmtBR.Alignment = 'Far'; $fmtBR.LineAlignment = 'Far'
+    $fTs = New-Object System.Drawing.Font('Arial', [Math]::Max(3.5, ($rc.Height * 0.045 * $px2pt)))
+    $g.DrawString((Get-Date).ToString('M/d/yy h:mm tt'), $fTs, $black, (New-Object System.Drawing.RectangleF($rc.X, $rc.Y, $rc.Width, $rc.Height)), $fmtBR)
+    $fTs.Dispose(); $fmtBR.Dispose()
+
     $fName.Dispose(); $fSku.Dispose(); $fmt.Dispose()
 }
 
@@ -578,6 +585,13 @@ function Draw-LabelInch([System.Drawing.Graphics]$g, [System.Drawing.RectangleF]
     $g.DrawString($digits, $fDig, $black, (New-Object System.Drawing.RectangleF($rc.X, ($y + $h + $barZ * 0.02), $rc.Width, [single]($barZ * 0.32))), $fmt)
     $fDig.Dispose()
 
+    # tiny print timestamp, bottom-right corner (print moment, per label)
+    $fmtBR = New-Object System.Drawing.StringFormat
+    $fmtBR.Alignment = 'Far'; $fmtBR.LineAlignment = 'Far'
+    $fTs = New-Object System.Drawing.Font('Arial', [single][Math]::Max(3.5, ($rc.Height * 0.045 * 72)))
+    $g.DrawString((Get-Date).ToString('M/d/yy h:mm tt'), $fTs, $black, (New-Object System.Drawing.RectangleF($rc.X, $rc.Y, $rc.Width, [single]$rc.Height)), $fmtBR)
+    $fTs.Dispose(); $fmtBR.Dispose()
+
     $fName.Dispose(); $fSku.Dispose(); $fmt.Dispose()
 }
 
@@ -677,6 +691,10 @@ $script:Strings = @{
         updTooltip     = 'Check for updates'
         updUpToDate    = 'Up to date - v{0} is the latest version.'
         updNoServer    = 'Could not check for updates - no connection to the release server.'
+        phNone         = 'NO PHOTO ON FILE'
+        phLoading      = 'LOADING PHOTO...'
+        phFailed       = 'PHOTO DOWNLOAD FAILED'
+        phSql          = 'SQL OFFLINE - NO PHOTO INFO'
     }
     es = @{
         scanCap        = 'ESCANEE EL CÓDIGO QR  (o escriba el SKU / código y presione Enter)'
@@ -724,6 +742,10 @@ $script:Strings = @{
         updTooltip     = 'Buscar actualización'
         updUpToDate    = 'Actualizado - v{0} es la última versión.'
         updNoServer    = 'No se pudo buscar actualizaciones - sin conexión al servidor.'
+        phNone         = 'SIN FOTO EN EL SISTEMA'
+        phLoading      = 'CARGANDO FOTO...'
+        phFailed       = 'FALLÓ LA DESCARGA DE LA FOTO'
+        phSql          = 'SQL SIN CONEXIÓN - SIN INFO DE FOTO'
     }
 }
 function T([string]$key) {
@@ -818,17 +840,29 @@ $picProduct.SizeMode = 'Zoom'
 $picProduct.BorderStyle = 'FixedSingle'
 $picProduct.BackColor = [System.Drawing.Color]::White
 
-# neutral placeholder (camera glyph), shown while loading / when no photo exists
-$script:NoPhotoImg = New-Object System.Drawing.Bitmap(148, 145)
-$gph = [System.Drawing.Graphics]::FromImage($script:NoPhotoImg)
-$gph.Clear([System.Drawing.Color]::FromArgb(246,247,249))
-$phFont = New-Object System.Drawing.Font('Segoe UI Emoji', 34)
-$phFmt = New-Object System.Drawing.StringFormat
-$phFmt.Alignment = 'Center'; $phFmt.LineAlignment = 'Center'
-$gph.DrawString([char]::ConvertFromUtf32(0x1F4F7), $phFont, [System.Drawing.Brushes]::Silver,
-    (New-Object System.Drawing.RectangleF(0, 0, 148, 145)), $phFmt)
-$gph.Dispose(); $phFont.Dispose(); $phFmt.Dispose()
-$picProduct.Image = $script:NoPhotoImg
+# state placeholders: each names WHY there is no photo (per language, tinted)
+function New-PlaceholderImage([string]$text, [string]$kind = 'none') {
+    switch ($kind) {
+        'loading' { $bg = [System.Drawing.Color]::FromArgb(228,238,250); $fg = [System.Drawing.Color]::FromArgb(70,110,160) }
+        'failed'  { $bg = [System.Drawing.Color]::FromArgb(250,230,230); $fg = [System.Drawing.Color]::FromArgb(170,60,60) }
+        'sql'     { $bg = [System.Drawing.Color]::FromArgb(252,240,220); $fg = [System.Drawing.Color]::FromArgb(160,105,20) }
+        default   { $bg = [System.Drawing.Color]::FromArgb(246,247,249); $fg = [System.Drawing.Color]::FromArgb(130,135,142) }
+    }
+    $bmp = New-Object System.Drawing.Bitmap(148, 145)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.Clear($bg)
+    $fmt = New-Object System.Drawing.StringFormat
+    $fmt.Alignment = 'Center'; $fmt.LineAlignment = 'Center'
+    $fEmoji = New-Object System.Drawing.Font('Segoe UI Emoji', 28)
+    $g.DrawString([char]::ConvertFromUtf32(0x1F4F7), $fEmoji, (New-Object System.Drawing.SolidBrush($fg)),
+        (New-Object System.Drawing.RectangleF(0, 8, 148, 84)), $fmt)
+    $fText = New-Object System.Drawing.Font('Segoe UI', 8, [System.Drawing.FontStyle]::Bold)
+    $g.DrawString($text, $fText, (New-Object System.Drawing.SolidBrush($fg)),
+        (New-Object System.Drawing.RectangleF(4, 92, 140, 48)), $fmt)
+    $g.Dispose(); $fEmoji.Dispose(); $fText.Dispose(); $fmt.Dispose()
+    return $bmp
+}
+$picProduct.Image = New-PlaceholderImage 'NO PHOTO'
 
 $lblInfo = New-Object System.Windows.Forms.Label
 $lblInfo.Text = ''
@@ -1008,12 +1042,12 @@ $form.Controls.AddRange(@($lblScan, $btnUpdate, $btnLang, $txtScan, $pnlStatus, 
 function Set-ProductPhoto($img) {
     $old = $picProduct.Image
     $picProduct.Image = $img
-    if ($old -and -not [object]::ReferenceEquals($old, $script:NoPhotoImg)) { try { $old.Dispose() } catch { } }
+    if ($old -and -not [object]::ReferenceEquals($old, $img)) { try { $old.Dispose() } catch { } }
 }
 function Show-ProductImage($job) {
     $script:ImgReqSku = [string]$job.Sku
     $safe = ($job.Sku -replace '[^\w\-\.]', '_')
-    if ($safe -eq '') { Set-ProductPhoto $script:NoPhotoImg; return }
+    if ($safe -eq '') { Set-ProductPhoto (New-PlaceholderImage (T 'phNone')); return }
     $cacheFile = Join-Path $script:ImgCacheDir "$safe.img"
     if (Test-Path $cacheFile) {
         try {
@@ -1022,8 +1056,17 @@ function Show-ProductImage($job) {
             return
         } catch { }
     }
-    Set-ProductPhoto $script:NoPhotoImg
-    if ("$($job.ImageUrl)" -eq '') { return }
+    if ($job.SqlStatus -like 'SQL offline*') {
+        # no SQL -> we never learned whether this product has a photo
+        Set-ProductPhoto (New-PlaceholderImage (T 'phSql') 'sql')
+        return
+    }
+    if ("$($job.ImageUrl)" -eq '') {
+        # SQL answered: this product has no image in ShipHero
+        Set-ProductPhoto (New-PlaceholderImage (T 'phNone'))
+        return
+    }
+    Set-ProductPhoto (New-PlaceholderImage (T 'phLoading') 'loading')
     try {
         $wc = New-Object System.Net.WebClient
         $wc | Add-Member -NotePropertyName JobSku -NotePropertyValue ([string]$job.Sku)
@@ -1037,12 +1080,17 @@ function Show-ProductImage($job) {
                         $ms2 = New-Object System.IO.MemoryStream(, $e.Result)
                         Set-ProductPhoto ([System.Drawing.Image]::FromStream($ms2))
                     }
+                } elseif ($script:ImgReqSku -eq $sender.JobSku) {
+                    # URL exists but the download was blocked / failed
+                    Set-ProductPhoto (New-PlaceholderImage (T 'phFailed') 'failed')
                 }
             } catch { }
             try { $sender.Dispose() } catch { }
         })
         $wc.DownloadDataAsync([Uri]$job.ImageUrl)
-    } catch { }
+    } catch {
+        Set-ProductPhoto (New-PlaceholderImage (T 'phFailed') 'failed')
+    }
 }
 
 $script:HistActive = $false   # true while the top row belongs to the queued product
