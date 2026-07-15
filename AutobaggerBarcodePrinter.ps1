@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 # Version of this release. Bump on every release - deployed stations compare
 # against the copy on the office share (settings: updateSource) and offer to
 # self-update when the shared copy is newer.
-$script:AppVersion = '2.4.2'
+$script:AppVersion = '2.4.3'
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -691,7 +691,7 @@ $script:Strings = @{
         updTooltip     = 'Check for updates'
         updUpToDate    = 'Up to date - v{0} is the latest version.'
         updNoServer    = 'Could not check for updates - no connection to the release server.'
-        phNone         = 'NO PHOTO ON FILE'
+        phNone         = 'NO PHOTO IN SHIPHERO'
         phLoading      = 'LOADING PHOTO...'
         phFailed       = 'PHOTO DOWNLOAD FAILED'
         phSql          = 'SQL OFFLINE - NO PHOTO INFO'
@@ -742,7 +742,7 @@ $script:Strings = @{
         updTooltip     = 'Buscar actualización'
         updUpToDate    = 'Actualizado - v{0} es la última versión.'
         updNoServer    = 'No se pudo buscar actualizaciones - sin conexión al servidor.'
-        phNone         = 'SIN FOTO EN EL SISTEMA'
+        phNone         = 'SIN FOTO EN SHIPHERO'
         phLoading      = 'CARGANDO FOTO...'
         phFailed       = 'FALLÓ LA DESCARGA DE LA FOTO'
         phSql          = 'SQL SIN CONEXIÓN - SIN INFO DE FOTO'
@@ -862,7 +862,7 @@ function New-PlaceholderImage([string]$text, [string]$kind = 'none') {
     $g.Dispose(); $fEmoji.Dispose(); $fText.Dispose(); $fmt.Dispose()
     return $bmp
 }
-$picProduct.Image = New-PlaceholderImage 'NO PHOTO'
+$picProduct.Image = New-PlaceholderImage (T 'phNone')
 
 $lblInfo = New-Object System.Windows.Forms.Label
 $lblInfo.Text = ''
