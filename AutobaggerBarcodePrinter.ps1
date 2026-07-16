@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 # Version of this release. Bump on every release - deployed stations compare
 # against the copy on the office share (settings: updateSource) and offer to
 # self-update when the shared copy is newer.
-$script:AppVersion = '2.6.3'
+$script:AppVersion = '2.7.0'
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -217,16 +217,24 @@ function Save-Settings($s) {
     try { ($s | ConvertTo-Json) | Set-Content -Path $script:SettingsFile -Encoding UTF8 } catch { }
 }
 
-function Write-PrintLog($input_, $sku, $qty, $printer, $result, $name = '', $target = '') {
+function Write-PrintLog($input_, $sku, $qty, $printer, $result, $name = '', $target = '', $client = '') {
     try {
         if (-not (Test-Path $script:LogFile)) {
-            'timestamp,input,sku,qty,printer,result,product,target' | Set-Content -Path $script:LogFile -Encoding UTF8
+            'timestamp,input,sku,qty,printer,result,product,target,client' | Set-Content -Path $script:LogFile -Encoding UTF8
         }
-        $line = '"{0}","{1}","{2}",{3},"{4}","{5}","{6}","{7}"' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),
+        $line = '"{0}","{1}","{2}",{3},"{4}","{5}","{6}","{7}","{8}"' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),
             ($input_ -replace '"',"'"), ($sku -replace '"',"'"), $qty, ($printer -replace '"',"'"),
-            ($result -replace '"',"'"), ($name -replace '"',"'"), $target
+            ($result -replace '"',"'"), ($name -replace '"',"'"), $target, ($client -replace '"',"'")
         Add-Content -Path $script:LogFile -Value $line -Encoding UTF8
     } catch { }
+}
+
+function Format-Duration([double]$sec) {
+    if ($sec -lt 1) { return '-' }
+    $ts = [TimeSpan]::FromSeconds($sec)
+    if ($ts.TotalMinutes -lt 1) { return ('{0}s' -f [int]$ts.TotalSeconds) }
+    if ($ts.TotalHours -lt 1) { return ('{0}m{1:d2}s' -f $ts.Minutes, $ts.Seconds) }
+    return ('{0}h{1:d2}m' -f [int]$ts.TotalHours, $ts.Minutes)
 }
 
 # Read the log back and group consecutive prints of the same SKU into one
@@ -236,11 +244,12 @@ function Load-History {
     if (-not (Test-Path $script:LogFile)) { return @() }
     try { $lines = Get-Content $script:LogFile -ErrorAction Stop | Select-Object -Last 300 } catch { return @() }
     foreach ($ln in $lines) {
-        if ($ln -match '^"(?<ts>[^"]*)","(?<in>[^"]*)","(?<sku>[^"]*)",(?<qty>\d+),"(?<pr>[^"]*)","(?<res>[^"]*)"(?:,"(?<name>[^"]*)")?(?:,"(?<tgt>[^"]*)")?\s*$') {
+        if ($ln -match '^"(?<ts>[^"]*)","(?<in>[^"]*)","(?<sku>[^"]*)",(?<qty>\d+),"(?<pr>[^"]*)","(?<res>[^"]*)"(?:,"(?<name>[^"]*)")?(?:,"(?<tgt>[^"]*)")?(?:,"(?<cli>[^"]*)")?\s*$') {
             # copy captures out FIRST - any later -match clobbers $Matches
             $mTs = $Matches['ts']; $mSku = $Matches['sku']; $mQty = [int]$Matches['qty']
             $mRes = $Matches['res']
             $name = if ($Matches['name']) { $Matches['name'] } else { '' }
+            $cli = if ($Matches['cli']) { $Matches['cli'] } else { '' }
             $tgtRaw = "$($Matches['tgt'])"
             if ($mRes -ne 'ok' -or $mSku -eq '') { continue }
             $tgt = 0
@@ -249,9 +258,10 @@ function Load-History {
                 $grouped[-1].Count += $mQty
                 $grouped[-1].Ts = $mTs
                 if ($name -ne '') { $grouped[-1].Name = $name }
+                if ($cli -ne '') { $grouped[-1].Client = $cli }
                 if ($tgt -gt 0) { $grouped[-1].Target = $tgt }
             } else {
-                $grouped += [pscustomobject]@{ Ts=$mTs; Sku=$mSku; Name=$name; Count=$mQty; Target=$tgt }
+                $grouped += [pscustomobject]@{ Ts=$mTs; TsFirst=$mTs; Sku=$mSku; Name=$name; Client=$cli; Count=$mQty; Target=$tgt }
             }
         }
     }
@@ -681,7 +691,7 @@ $script:Strings = @{
         printLabels    = 'PRINT {0} {1}  -  press Ctrl+P'
         printOffline   = 'PRINT {0} {1} (from QR - SQL offline)  -  press Ctrl+P'
         printedProgress= 'PRINTED {0} of {1}  -  {2} more, press Ctrl+P'
-        printedAll     = 'ALL {0} PRINTED  -  scan the next item'
+        printedAll     = 'ALL {0} PRINTED ✔  -  scan the next item'
         printedOver    = 'PRINTED {0}  (target was {1})'
         notFound       = 'NOT FOUND - check the scan and try again'
         scanned        = 'scanned: '
@@ -698,13 +708,15 @@ $script:Strings = @{
         sendTo         = 'Send labels to:'
         countCap       = 'PRINTED / NEEDED'
         moreToPrint    = '{0} MORE TO PRINT'
-        allDone        = 'ALL DONE'
+        allDone        = '✔ ALL DONE'
         targetWas      = 'target was {0}'
         btnPrint       = 'PRINT 1 LABEL   (Ctrl+P)'
         btnScanFirst   = 'SCAN A QR CODE FIRST'
         histCap        = 'RECENT PRINTS  (newest on top)'
         colTime        = 'Time'
         colLabels      = 'Labels'
+        colDur         = 'Took'
+        colClient      = 'Client'
         colProduct     = 'Product'
         btnSpooler     = 'fix stuck printer'
         spoolClearing  = 'Clearing print queue - approve the admin prompt...'
@@ -734,7 +746,7 @@ $script:Strings = @{
         printLabels    = 'IMPRIMIR {0} {1}  -  presione Ctrl+P'
         printOffline   = 'IMPRIMIR {0} {1} (desde QR - SQL sin conexión)  -  presione Ctrl+P'
         printedProgress= 'IMPRESAS {0} de {1}  -  {2} más, presione Ctrl+P'
-        printedAll     = 'TODAS IMPRESAS ({0})  -  escanee el siguiente artículo'
+        printedAll     = 'TODAS IMPRESAS ({0}) ✔  -  escanee el siguiente artículo'
         printedOver    = 'IMPRESAS {0}  (la meta era {1})'
         notFound       = 'NO ENCONTRADO - revise el escaneo e intente de nuevo'
         scanned        = 'escaneado: '
@@ -751,13 +763,15 @@ $script:Strings = @{
         sendTo         = 'Imprimir en:'
         countCap       = 'IMPRESAS / NECESARIAS'
         moreToPrint    = '{0} MÁS POR IMPRIMIR'
-        allDone        = '¡COMPLETO!'
+        allDone        = '✔ ¡COMPLETO!'
         targetWas      = 'la meta era {0}'
         btnPrint       = 'IMPRIMIR 1 ETIQUETA   (Ctrl+P)'
         btnScanFirst   = 'PRIMERO ESCANEE UN CÓDIGO QR'
         histCap        = 'IMPRESIONES RECIENTES  (la más nueva arriba)'
         colTime        = 'Hora'
         colLabels      = 'Etiq.'
+        colDur         = 'Duró'
+        colClient      = 'Cliente'
         colProduct     = 'Producto'
         btnSpooler     = 'arreglar impresora'
         spoolClearing  = 'Limpiando la cola de impresión - apruebe el aviso de administrador...'
@@ -1023,17 +1037,19 @@ $lv.GridLines = $true
 $lv.MultiSelect = $false
 $lv.HideSelection = $true
 $lv.HeaderStyle = 'Nonclickable'
-$lv.Font = New-Object System.Drawing.Font('Segoe UI', 10.5)
+$lv.Font = New-Object System.Drawing.Font('Segoe UI', 9)
 $lv.Location = New-Object System.Drawing.Point(16, 462)
 $lv.Size = New-Object System.Drawing.Size(712, 140)
 $lv.Anchor = 'Top,Left,Right,Bottom'
-[void]$lv.Columns.Add('Time', 120)
-[void]$lv.Columns.Add('Labels', 55)
-[void]$lv.Columns.Add('SKU', 225)
-[void]$lv.Columns.Add('Product', 270)
+[void]$lv.Columns.Add('Time', 104)
+[void]$lv.Columns.Add('Labels', 48)
+[void]$lv.Columns.Add('Took', 52)
+[void]$lv.Columns.Add('SKU', 176)
+[void]$lv.Columns.Add('Client', 102)
+[void]$lv.Columns.Add('Product', 210)
 # Product column fills the remaining width - no horizontal scrollbar
 $lv.add_ClientSizeChanged({
-    try { $lv.Columns[3].Width = [Math]::Max(150, ($lv.ClientSize.Width - 400 - 4)) } catch { }
+    try { $lv.Columns[5].Width = [Math]::Max(140, ($lv.ClientSize.Width - 482 - 4)) } catch { }
 })
 
 # --- bottom status bar: today's total + update link ---
@@ -1320,10 +1336,14 @@ function Add-HistRow($job) {
         $it = $lv.Items[0]
         $it.SubItems[0].Text = (Get-Date).ToString('h:mm tt')
         $it.SubItems[1].Text = $cell
+        $it.SubItems[2].Text = Format-Duration ((Get-Date) - $script:BatchStart).TotalSeconds
     } else {
+        $script:BatchStart = Get-Date
         $it = New-Object System.Windows.Forms.ListViewItem((Get-Date).ToString('h:mm tt'))
         [void]$it.SubItems.Add($cell)
+        [void]$it.SubItems.Add('-')
         [void]$it.SubItems.Add([string]$job.Sku)
+        [void]$it.SubItems.Add([string]$job.Client)
         [void]$it.SubItems.Add([string]$job.Name)
         [void]$lv.Items.Insert(0, $it)
         $script:HistActive = $true
@@ -1336,9 +1356,19 @@ try {
     if ($hist.Count -gt 50) { $hist = @($hist[($hist.Count-50)..($hist.Count-1)]) }
     [array]::Reverse($hist)
     foreach ($h in $hist) {
+        $dur = '-'
+        if ($h.Count -gt 1) {
+            try {
+                $d0 = [datetime]::ParseExact($h.TsFirst, 'yyyy-MM-dd HH:mm:ss', $null)
+                $d1 = [datetime]::ParseExact($h.Ts, 'yyyy-MM-dd HH:mm:ss', $null)
+                $dur = Format-Duration ($d1 - $d0).TotalSeconds
+            } catch { }
+        }
         $it = New-Object System.Windows.Forms.ListViewItem((Format-HistTime $h.Ts))
         [void]$it.SubItems.Add((Format-LabelsCell $h.Count $h.Target))
+        [void]$it.SubItems.Add($dur)
         [void]$it.SubItems.Add([string]$h.Sku)
+        [void]$it.SubItems.Add([string]$h.Client)
         [void]$it.SubItems.Add([string]$h.Name)
         [void]$lv.Items.Add($it)
     }
@@ -1401,7 +1431,7 @@ function Do-Print($job) {
         Bump-TodayCount
         Add-HistRow $job
         Show-JobStatus $job
-        Write-PrintLog $job.Raw $job.Sku 1 $printer 'ok' $job.Name ([int]$job.Qty)
+        Write-PrintLog $job.Raw $job.Sku 1 $printer 'ok' $job.Name ([int]$job.Qty) $job.Client
     } catch {
         Set-Status (T 'printFailed') 'error' $_.Exception.Message
         Write-PrintLog $job.Raw $job.Sku 1 $printer ("error: " + $_.Exception.Message)
@@ -1519,7 +1549,9 @@ function Apply-Language {
     $btnSpooler.Text = "$emojiBroom " + (T 'btnSpooler')
     $lv.Columns[0].Text = T 'colTime'
     $lv.Columns[1].Text = T 'colLabels'
-    $lv.Columns[3].Text = T 'colProduct'
+    $lv.Columns[2].Text = T 'colDur'
+    $lv.Columns[4].Text = T 'colClient'
+    $lv.Columns[5].Text = T 'colProduct'
     Update-TodayBar
     & $script:UpdatePrintButtonLook
     if ($script:CurrentJob -and $script:CurrentJob.CanPrint) {
@@ -1612,6 +1644,29 @@ $updTimer.add_Tick({
     Check-ForUpdate
 })
 $updTimer.Start()
+
+# --- focus indicator: red frame + tinted scan box when scans would NOT land here
+$script:FormFocused = $true
+function Update-FocusLook {
+    if ($script:FormFocused) {
+        $txtScan.BackColor = [System.Drawing.Color]::FromArgb(255,255,220)
+        $statusStrip.BackColor = [System.Drawing.SystemColors]::Control
+    } else {
+        $txtScan.BackColor = [System.Drawing.Color]::FromArgb(255,214,214)
+        $statusStrip.BackColor = [System.Drawing.Color]::FromArgb(250,226,226)
+    }
+    $form.Invalidate()
+}
+$form.add_Activated({ $script:FormFocused = $true; Update-FocusLook })
+$form.add_Deactivate({ $script:FormFocused = $false; Update-FocusLook })
+$form.add_Paint({
+    param($s, $e)
+    if (-not $script:FormFocused) {
+        $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(210, 214, 60, 60), 5)
+        $e.Graphics.DrawRectangle($pen, 2, 2, ($s.ClientSize.Width - 5), ($s.ClientSize.Height - 5))
+        $pen.Dispose()
+    }
+})
 
 # Ctrl+P anywhere in the window = print one label (KeyPreview is on)
 $form.add_KeyDown({
@@ -1727,6 +1782,16 @@ if ($SmokeTest) {
     $out = Join-Path $script:AppDir 'smoketest-ui.png'
     $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
     $bmp.Dispose()
+    # unfocused (red border) rendering check
+    $script:FormFocused = $false
+    Update-FocusLook
+    $form.Refresh()
+    $bmpU = New-Object System.Drawing.Bitmap($form.Width, $form.Height)
+    $form.DrawToBitmap($bmpU, (New-Object System.Drawing.Rectangle(0, 0, $form.Width, $form.Height)))
+    $bmpU.Save((Join-Path $script:AppDir 'smoketest-unfocused.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+    $bmpU.Dispose()
+    $script:FormFocused = $true
+    Update-FocusLook
     # Spanish rendering check
     $script:Lang = 'es'
     Apply-Language
