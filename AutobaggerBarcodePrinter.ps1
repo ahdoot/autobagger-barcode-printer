@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 # Version of this release. Bump on every release - deployed stations compare
 # against the copy on the office share (settings: updateSource) and offer to
 # self-update when the shared copy is newer.
-$script:AppVersion = '2.6.2'
+$script:AppVersion = '2.6.3'
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -217,14 +217,14 @@ function Save-Settings($s) {
     try { ($s | ConvertTo-Json) | Set-Content -Path $script:SettingsFile -Encoding UTF8 } catch { }
 }
 
-function Write-PrintLog($input_, $sku, $qty, $printer, $result, $name = '') {
+function Write-PrintLog($input_, $sku, $qty, $printer, $result, $name = '', $target = '') {
     try {
         if (-not (Test-Path $script:LogFile)) {
-            'timestamp,input,sku,qty,printer,result,product' | Set-Content -Path $script:LogFile -Encoding UTF8
+            'timestamp,input,sku,qty,printer,result,product,target' | Set-Content -Path $script:LogFile -Encoding UTF8
         }
-        $line = '"{0}","{1}","{2}",{3},"{4}","{5}","{6}"' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),
+        $line = '"{0}","{1}","{2}",{3},"{4}","{5}","{6}","{7}"' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),
             ($input_ -replace '"',"'"), ($sku -replace '"',"'"), $qty, ($printer -replace '"',"'"),
-            ($result -replace '"',"'"), ($name -replace '"',"'")
+            ($result -replace '"',"'"), ($name -replace '"',"'"), $target
         Add-Content -Path $script:LogFile -Value $line -Encoding UTF8
     } catch { }
 }
@@ -236,19 +236,32 @@ function Load-History {
     if (-not (Test-Path $script:LogFile)) { return @() }
     try { $lines = Get-Content $script:LogFile -ErrorAction Stop | Select-Object -Last 300 } catch { return @() }
     foreach ($ln in $lines) {
-        if ($ln -match '^"(?<ts>[^"]*)","(?<in>[^"]*)","(?<sku>[^"]*)",(?<qty>\d+),"(?<pr>[^"]*)","(?<res>[^"]*)"(?:,"(?<name>[^"]*)")?\s*$') {
-            if ($Matches['res'] -ne 'ok' -or $Matches['sku'] -eq '') { continue }
+        if ($ln -match '^"(?<ts>[^"]*)","(?<in>[^"]*)","(?<sku>[^"]*)",(?<qty>\d+),"(?<pr>[^"]*)","(?<res>[^"]*)"(?:,"(?<name>[^"]*)")?(?:,"(?<tgt>[^"]*)")?\s*$') {
+            # copy captures out FIRST - any later -match clobbers $Matches
+            $mTs = $Matches['ts']; $mSku = $Matches['sku']; $mQty = [int]$Matches['qty']
+            $mRes = $Matches['res']
             $name = if ($Matches['name']) { $Matches['name'] } else { '' }
-            if ($grouped.Count -gt 0 -and $grouped[-1].Sku -eq $Matches['sku']) {
-                $grouped[-1].Count += [int]$Matches['qty']
-                $grouped[-1].Ts = $Matches['ts']
+            $tgtRaw = "$($Matches['tgt'])"
+            if ($mRes -ne 'ok' -or $mSku -eq '') { continue }
+            $tgt = 0
+            if ($tgtRaw -match '^\d+$') { $tgt = [int]$tgtRaw }
+            if ($grouped.Count -gt 0 -and $grouped[-1].Sku -eq $mSku) {
+                $grouped[-1].Count += $mQty
+                $grouped[-1].Ts = $mTs
                 if ($name -ne '') { $grouped[-1].Name = $name }
+                if ($tgt -gt 0) { $grouped[-1].Target = $tgt }
             } else {
-                $grouped += [pscustomobject]@{ Ts=$Matches['ts']; Sku=$Matches['sku']; Name=$name; Count=[int]$Matches['qty'] }
+                $grouped += [pscustomobject]@{ Ts=$mTs; Sku=$mSku; Name=$name; Count=$mQty; Target=$tgt }
             }
         }
     }
     return $grouped
+}
+
+# "31/30" when the target is known, plain count for old log rows without one
+function Format-LabelsCell([int]$count, [int]$target) {
+    if ($target -gt 0) { return "$count/$target" }
+    return "$count"
 }
 
 # total labels successfully printed today (from the log; survives restarts)
@@ -1302,13 +1315,14 @@ function Show-ProductImage($job) {
 $script:HistActive = $false   # true while the top row belongs to the queued product
 
 function Add-HistRow($job) {
+    $cell = Format-LabelsCell $script:PrintedCount ([int]$job.Qty)
     if ($script:HistActive -and $lv.Items.Count -gt 0) {
         $it = $lv.Items[0]
         $it.SubItems[0].Text = (Get-Date).ToString('h:mm tt')
-        $it.SubItems[1].Text = [string]$script:PrintedCount
+        $it.SubItems[1].Text = $cell
     } else {
         $it = New-Object System.Windows.Forms.ListViewItem((Get-Date).ToString('h:mm tt'))
-        [void]$it.SubItems.Add([string]$script:PrintedCount)
+        [void]$it.SubItems.Add($cell)
         [void]$it.SubItems.Add([string]$job.Sku)
         [void]$it.SubItems.Add([string]$job.Name)
         [void]$lv.Items.Insert(0, $it)
@@ -1323,7 +1337,7 @@ try {
     [array]::Reverse($hist)
     foreach ($h in $hist) {
         $it = New-Object System.Windows.Forms.ListViewItem((Format-HistTime $h.Ts))
-        [void]$it.SubItems.Add([string]$h.Count)
+        [void]$it.SubItems.Add((Format-LabelsCell $h.Count $h.Target))
         [void]$it.SubItems.Add([string]$h.Sku)
         [void]$it.SubItems.Add([string]$h.Name)
         [void]$lv.Items.Add($it)
@@ -1387,7 +1401,7 @@ function Do-Print($job) {
         Bump-TodayCount
         Add-HistRow $job
         Show-JobStatus $job
-        Write-PrintLog $job.Raw $job.Sku 1 $printer 'ok' $job.Name
+        Write-PrintLog $job.Raw $job.Sku 1 $printer 'ok' $job.Name ([int]$job.Qty)
     } catch {
         Set-Status (T 'printFailed') 'error' $_.Exception.Message
         Write-PrintLog $job.Raw $job.Sku 1 $printer ("error: " + $_.Exception.Message)
