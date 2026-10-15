@@ -7,7 +7,7 @@
 //   SHIPHERO_USERNAME / SHIPHERO_PASSWORD  optional fallback login if the refresh token stops working
 //   TRAINING_PIN                           optional; when set, requests must send the same pin
 
-const { SHIPBOTS_ACCOUNT_ID, PRODUCTS, SHIP_TO, FIRST_NAMES, LAST_NAMES } = require('./_catalog');
+const { SHIPBOTS_ACCOUNT_ID, PRODUCTS, SHIP_TO } = require('./_catalog');
 const { API, accessToken, resetToken } = require('./_auth');
 
 const MAX_ORDERS = 20;
@@ -21,8 +21,6 @@ const ORDER_CREATE = `mutation CreateTrainingOrder($data: CreateOrderInput!) {
     order { id legacy_id order_number fulfillment_status }
   }
 }`;
-
-const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 // Order numbers run TEST-TRAINING-001, -002, ... The next number comes from the
 // highest one already in ShipHero, so it survives redeploys and cold starts.
@@ -75,8 +73,9 @@ function cleanLines(lines) {
 }
 
 function buildOrder(lines, number) {
-  const first = pick(FIRST_NAMES);
-  const last = pick(LAST_NAMES);
+  // Every training order is addressed to TEST TEST (shipping and billing).
+  const first = 'TEST';
+  const last = 'TEST';
   const total = lines.reduce((s, l) => s + Number(PRODUCTS[l.sku].price) * l.qty, 0).toFixed(2);
   const address = { ...SHIP_TO, first_name: first, last_name: last };
   return {
