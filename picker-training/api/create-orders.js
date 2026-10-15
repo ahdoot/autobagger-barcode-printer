@@ -3,12 +3,13 @@
 // Creates pending ShipHero orders in the SHIPBOTS child account for picker training.
 //
 // Env vars (set in Vercel):
-//   SHIPHERO_REFRESH_TOKEN  ShipHero Public API refresh token (3PL user with order write access)
-//   TRAINING_PIN            optional; when set, requests must send the same pin
+//   SHIPHERO_REFRESH_TOKEN                 ShipHero Public API refresh token (3PL user with order write access)
+//   SHIPHERO_USERNAME / SHIPHERO_PASSWORD  optional fallback login if the refresh token stops working
+//   TRAINING_PIN                           optional; when set, requests must send the same pin
 
 const { SHIPBOTS_ACCOUNT_ID, PRODUCTS, SHIP_TO, FIRST_NAMES, LAST_NAMES } = require('./_catalog');
+const { API, accessToken, resetToken } = require('./_auth');
 
-const API = 'https://public-api.shiphero.com';
 const MAX_ORDERS = 20;
 const MAX_LINES = 6;
 const MAX_QTY = 5;
@@ -20,23 +21,6 @@ const ORDER_CREATE = `mutation CreateTrainingOrder($data: CreateOrderInput!) {
     order { id legacy_id order_number fulfillment_status }
   }
 }`;
-
-let cachedToken = null; // { value, expiresAt }
-
-async function accessToken() {
-  if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) return cachedToken.value;
-  const refresh = process.env.SHIPHERO_REFRESH_TOKEN;
-  if (!refresh) throw new Error('SHIPHERO_REFRESH_TOKEN is not set in Vercel.');
-  const r = await fetch(`${API}/auth/refresh`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refresh_token: refresh }),
-  });
-  const body = await r.json().catch(() => ({}));
-  if (!r.ok || !body.access_token) throw new Error(`ShipHero auth failed (${r.status}).`);
-  cachedToken = { value: body.access_token, expiresAt: Date.now() + (body.expires_in || 3600) * 1000 };
-  return cachedToken.value;
-}
 
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
@@ -102,6 +86,7 @@ async function createOrder(token, data) {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ query: ORDER_CREATE, variables: { data } }),
   });
+  if (r.status === 401) resetToken(); // token revoked: log in fresh on the next request
   const body = await r.json().catch(() => ({}));
   if (body.errors && body.errors.length) {
     throw new Error(body.errors.map((e) => e.message).join('; '));
