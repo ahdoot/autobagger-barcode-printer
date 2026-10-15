@@ -24,12 +24,40 @@ const ORDER_CREATE = `mutation CreateTrainingOrder($data: CreateOrderInput!) {
 
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-function orderNumber() {
-  const d = new Date();
-  const mmdd = String(d.getUTCMonth() + 1).padStart(2, '0') + String(d.getUTCDate()).padStart(2, '0');
-  const rand = Math.random().toString(36).slice(2, 6).toUpperCase().padEnd(4, 'X');
-  return `TRN-${mmdd}-${rand}`;
+// Order numbers run TEST-TRAINING-001, -002, ... The next number comes from the
+// highest one already in ShipHero, so it survives redeploys and cold starts.
+const PREFIX = 'TEST-TRAINING-';
+let lastIssued = 0; // guards against reusing a number before ShipHero lists it
+
+const LATEST_ORDERS = `query LatestTraining($acct: String, $from: ISODateTime, $to: ISODateTime) {
+  orders(customer_account_id: $acct, shop_name: "Picker Training", order_date_from: $from, order_date_to: $to) {
+    data(first: 25, sort: "-order_date") { edges { node { order_number } } }
+  }
+}`;
+
+async function highestOrderNumber(token) {
+  const to = new Date();
+  const from = new Date(to.getTime() - 365 * 24 * 3600 * 1000);
+  const r = await fetch(`${API}/graphql`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      query: LATEST_ORDERS,
+      variables: { acct: SHIPBOTS_ACCOUNT_ID, from: from.toISOString(), to: to.toISOString() },
+    }),
+  });
+  const body = await r.json().catch(() => ({}));
+  const edges = (body.data && body.data.orders && body.data.orders.data && body.data.orders.data.edges) || [];
+  if (!r.ok || (body.errors && body.errors.length)) throw new Error('Could not read the last training order number from ShipHero.');
+  let max = 0;
+  for (const e of edges) {
+    const m = /^TEST-TRAINING-(\d+)$/.exec((e.node && e.node.order_number) || '');
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return max;
 }
+
+const formatNumber = (n) => PREFIX + String(n).padStart(3, '0');
 
 // Merge duplicate SKUs and reject anything outside the training catalog.
 function cleanLines(lines) {
@@ -46,8 +74,7 @@ function cleanLines(lines) {
   return [...merged].map(([sku, qty]) => ({ sku, qty }));
 }
 
-function buildOrder(lines) {
-  const number = orderNumber();
+function buildOrder(lines, number) {
   const first = pick(FIRST_NAMES);
   const last = pick(LAST_NAMES);
   const total = lines.reduce((s, l) => s + Number(PRODUCTS[l.sku].price) * l.qty, 0).toFixed(2);
@@ -123,9 +150,17 @@ module.exports = async function handler(req, res) {
   }
 
   // Sequential on purpose: keeps us well under ShipHero's credit throttle.
+  let next;
+  try {
+    next = Math.max(await highestOrderNumber(token), lastIssued) + 1;
+  } catch (e) {
+    return res.status(502).json({ error: e.message });
+  }
+
   const results = [];
   for (const lines of orders) {
-    const data = buildOrder(lines);
+    lastIssued = next;
+    const data = buildOrder(lines, formatNumber(next++));
     try {
       const order = await createOrder(token, data);
       results.push({
