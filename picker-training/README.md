@@ -31,5 +31,16 @@ comes right back.
 3. Environment variables:
    - `SHIPHERO_REFRESH_TOKEN` – refresh token for a ShipHero API (developer) user on the
      3PL parent account. It needs permission to create orders.
+   - `SHIPHERO_USERNAME` / `SHIPHERO_PASSWORD` – optional backup login. Used only if the
+     refresh token is ever rejected, so the app keeps working without anyone swapping tokens.
    - `TRAINING_PIN` – optional. When set, the page asks for this PIN before creating orders.
 4. Deploy.
+
+Live: https://autobagger-barcode-printer-picker-t.vercel.app/
+
+## Token upkeep
+
+ShipHero access tokens last 28 days; the app gets a fresh one from the refresh token
+automatically. If the refresh token stops working, the app falls back to the username/password
+login. `GET /api/health` reports whether login works (`ok`, and `via` = `refresh_token` or
+`password_login`) and is checked weekly by a scheduled Claude task that alerts on failure.
