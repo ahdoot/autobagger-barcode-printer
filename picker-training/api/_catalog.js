@@ -25,7 +25,5 @@ const SHIP_TO = {
   phone: '818-305-4263',
 };
 
-const FIRST_NAMES = ['Ava', 'Liam', 'Mia', 'Noah', 'Zoe', 'Leo', 'Ivy', 'Max', 'Ruby', 'Eli', 'Luna', 'Kai', 'Nora', 'Owen', 'Sofia', 'Jade'];
-const LAST_NAMES = ['Sweet', 'Candy', 'Cocoa', 'Gumdrop', 'Toffee', 'Fudge', 'Sprinkle', 'Caramel', 'Mint', 'Nougat'];
 
-module.exports = { SHIPBOTS_ACCOUNT_ID, PRODUCTS, SHIP_TO, FIRST_NAMES, LAST_NAMES };
+module.exports = { SHIPBOTS_ACCOUNT_ID, PRODUCTS, SHIP_TO };
