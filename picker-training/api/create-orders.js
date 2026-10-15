@@ -1,0 +1,158 @@
+// POST /api/create-orders
+// Body: { pin?: string, orders: [ { lines: [ { sku, qty } ] } ] }
+// Creates pending ShipHero orders in the SHIPBOTS child account for picker training.
+//
+// Env vars (set in Vercel):
+//   SHIPHERO_REFRESH_TOKEN  ShipHero Public API refresh token (3PL user with order write access)
+//   TRAINING_PIN            optional; when set, requests must send the same pin
+
+const { SHIPBOTS_ACCOUNT_ID, PRODUCTS, SHIP_TO, FIRST_NAMES, LAST_NAMES } = require('./_catalog');
+
+const API = 'https://public-api.shiphero.com';
+const MAX_ORDERS = 20;
+const MAX_LINES = 6;
+const MAX_QTY = 5;
+
+const ORDER_CREATE = `mutation CreateTrainingOrder($data: CreateOrderInput!) {
+  order_create(data: $data) {
+    request_id
+    complexity
+    order { id legacy_id order_number fulfillment_status }
+  }
+}`;
+
+let cachedToken = null; // { value, expiresAt }
+
+async function accessToken() {
+  if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) return cachedToken.value;
+  const refresh = process.env.SHIPHERO_REFRESH_TOKEN;
+  if (!refresh) throw new Error('SHIPHERO_REFRESH_TOKEN is not set in Vercel.');
+  const r = await fetch(`${API}/auth/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: refresh }),
+  });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok || !body.access_token) throw new Error(`ShipHero auth failed (${r.status}).`);
+  cachedToken = { value: body.access_token, expiresAt: Date.now() + (body.expires_in || 3600) * 1000 };
+  return cachedToken.value;
+}
+
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+function orderNumber() {
+  const d = new Date();
+  const mmdd = String(d.getUTCMonth() + 1).padStart(2, '0') + String(d.getUTCDate()).padStart(2, '0');
+  const rand = Math.random().toString(36).slice(2, 6).toUpperCase().padEnd(4, 'X');
+  return `TRN-${mmdd}-${rand}`;
+}
+
+// Merge duplicate SKUs and reject anything outside the training catalog.
+function cleanLines(lines) {
+  if (!Array.isArray(lines) || lines.length === 0) throw new Error('Each order needs at least one item.');
+  const merged = new Map();
+  for (const l of lines) {
+    const sku = String(l && l.sku || '').trim().toUpperCase();
+    const qty = Number.parseInt(l && l.qty, 10);
+    if (!PRODUCTS[sku]) throw new Error(`Unknown SKU: ${sku || '(blank)'}`);
+    if (!Number.isInteger(qty) || qty < 1) throw new Error(`Bad quantity for ${sku}.`);
+    merged.set(sku, Math.min(MAX_QTY, (merged.get(sku) || 0) + qty));
+  }
+  if (merged.size > MAX_LINES) throw new Error(`Max ${MAX_LINES} different items per order.`);
+  return [...merged].map(([sku, qty]) => ({ sku, qty }));
+}
+
+function buildOrder(lines) {
+  const number = orderNumber();
+  const first = pick(FIRST_NAMES);
+  const last = pick(LAST_NAMES);
+  const total = lines.reduce((s, l) => s + Number(PRODUCTS[l.sku].price) * l.qty, 0).toFixed(2);
+  const address = { ...SHIP_TO, first_name: first, last_name: last };
+  return {
+    customer_account_id: SHIPBOTS_ACCOUNT_ID,
+    order_number: number,
+    partner_order_id: number,
+    shop_name: 'Picker Training',
+    fulfillment_status: 'pending',
+    order_date: new Date().toISOString(),
+    email: 'picker-training@example.com',
+    tags: ['picker-training'],
+    subtotal: total,
+    total_price: total,
+    total_tax: '0.00',
+    total_discounts: '0.00',
+    shipping_lines: { title: 'Standard', price: '0.00' },
+    shipping_address: address,
+    billing_address: address,
+    skip_address_validation: true,
+    ignore_address_validation_errors: true,
+    line_items: lines.map((l, i) => ({
+      sku: l.sku,
+      partner_line_item_id: `${number}-${i + 1}`,
+      quantity: l.qty,
+      price: PRODUCTS[l.sku].price,
+      product_name: PRODUCTS[l.sku].name,
+    })),
+  };
+}
+
+async function createOrder(token, data) {
+  const r = await fetch(`${API}/graphql`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ query: ORDER_CREATE, variables: { data } }),
+  });
+  const body = await r.json().catch(() => ({}));
+  if (body.errors && body.errors.length) {
+    throw new Error(body.errors.map((e) => e.message).join('; '));
+  }
+  const out = body.data && body.data.order_create;
+  if (!r.ok || !out || !out.order) throw new Error(`ShipHero returned ${r.status}.`);
+  return out.order;
+}
+
+module.exports = async function handler(req, res) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return res.status(405).json({ error: 'POST only' });
+  }
+  const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+
+  const pin = process.env.TRAINING_PIN;
+  if (pin && String(body.pin || '') !== pin) return res.status(401).json({ error: 'Wrong PIN.' });
+
+  let orders;
+  try {
+    if (!Array.isArray(body.orders) || body.orders.length === 0) throw new Error('No orders sent.');
+    if (body.orders.length > MAX_ORDERS) throw new Error(`Max ${MAX_ORDERS} orders per click.`);
+    orders = body.orders.map((o) => cleanLines(o && o.lines));
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
+  }
+
+  let token;
+  try {
+    token = await accessToken();
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+
+  // Sequential on purpose: keeps us well under ShipHero's credit throttle.
+  const results = [];
+  for (const lines of orders) {
+    const data = buildOrder(lines);
+    try {
+      const order = await createOrder(token, data);
+      results.push({
+        ok: true,
+        order_number: order.order_number,
+        legacy_id: order.legacy_id,
+        customer: `${data.shipping_address.first_name} ${data.shipping_address.last_name}`,
+        lines,
+      });
+    } catch (e) {
+      results.push({ ok: false, order_number: data.order_number, error: e.message, lines });
+    }
+  }
+  return res.status(200).json({ results });
+};
