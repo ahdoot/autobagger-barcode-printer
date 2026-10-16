@@ -53,6 +53,9 @@ h1 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.01em; }
 .status.on i { background: var(--ok); }
 .status.off i { background: var(--bad); }
 .pin { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.btn.small { width: auto; min-height: 36px; padding: 6px 12px; font-size: 13px; border-radius: 9px; }
+.confirm { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; background: var(--soft); border-radius: 10px; padding: 6px 8px 6px 12px; }
 .pin input { width: 5.5em; font: 600 15px var(--mono); padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); }
 
 .step { font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
@@ -136,7 +139,15 @@ h1 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.01em; }
       <p class="sub">Choose what goes in each order, how many orders, then Create.</p>
     </div>
     <label class="pin" id="pinWrap" hidden>PIN <input id="pin" type="password" inputmode="numeric" autocomplete="off"></label>
-    <span class="status" id="status"><i></i><span>ShipHero</span></span>
+    <div class="tools">
+      <span class="status" id="status"><i></i><span>ShipHero</span></span>
+      <button class="btn ghost small" id="resetBtn" type="button">Reset station</button>
+      <span class="confirm" id="resetConfirm" hidden>
+        <span>Restock bins and cancel all open training orders?</span>
+        <button class="btn small" id="resetYes" type="button">Reset</button>
+        <button class="btn ghost small" id="resetNo" type="button">Keep</button>
+      </span>
+    </div>
   </header>
 
   <div class="panel">
@@ -334,6 +345,43 @@ async function createAll() {
   renderSummary();
 }
 
+async function reset(mode) {
+  const r = await fetch('/api/reset', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pin: $('pin').value, mode }),
+  });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || `Error ${r.status}`);
+  return body;
+}
+function describeReset(b) {
+  const parts = [];
+  if (b.cleared.length) parts.push(`${b.cleared.length} tote${b.cleared.length > 1 ? 's' : ''} cleared`);
+  if (b.cancelled.length) parts.push(`${b.cancelled.length} order${b.cancelled.length > 1 ? 's' : ''} cancelled`);
+  if (b.errors.length) parts.push(`${b.errors.length} failed`);
+  return parts.join(', ');
+}
+async function loadRecent() {
+  const rec = await fetch('/api/recent').then((r) => r.json());
+  setStatus(Boolean(rec.ok));
+  renderRecent(rec.orders || []);
+  const top = (rec.orders || []).map((o) => o.number).find((n) => /^TEST-TRAINING-\d+$/.test(n));
+  if (top) lastNumber = top;
+}
+$('resetBtn').addEventListener('click', () => { $('resetBtn').hidden = true; $('resetConfirm').hidden = false; });
+$('resetNo').addEventListener('click', () => { $('resetConfirm').hidden = true; $('resetBtn').hidden = false; });
+$('resetYes').addEventListener('click', async () => {
+  const y = $('resetYes'); y.disabled = true; y.textContent = 'Resetting…';
+  try {
+    const b = await reset('all');
+    toast(describeReset(b) ? 'Reset: ' + describeReset(b) : 'Nothing to reset');
+    if (b.errors.length) console.warn(b.errors);
+    await loadRecent();
+  } catch (e) { toast(e.message); }
+  y.disabled = false; y.textContent = 'Reset';
+  $('resetConfirm').hidden = true; $('resetBtn').hidden = false;
+});
+
 document.addEventListener('click', (e) => {
   const pre = e.target.closest('[data-p]');
   if (pre) { Object.keys(qty).forEach((k) => delete qty[k]); Object.assign(qty, PRESETS[pre.dataset.p].lines); return renderList(); }
@@ -364,12 +412,13 @@ $('pin').addEventListener('input', savePin);
     toast('Could not load the product list. Refresh.');
     return;
   }
+  // Clean up anything left from a finished session (totes idle 30+ min), then show the list.
   try {
-    const rec = await fetch('/api/recent').then((r) => r.json());
-    setStatus(Boolean(rec.ok));
-    renderRecent(rec.orders || []);
-    const top = (rec.orders || []).map((o) => o.number).find((n) => /^TEST-TRAINING-\d+$/.test(n));
-    if (top) lastNumber = top;
+    const b = await reset('auto');
+    if (describeReset(b)) toast('Auto-reset: ' + describeReset(b));
+  } catch (e) { /* not fatal; the list below still shows the real state */ }
+  try {
+    await loadRecent();
   } catch (e) {
     setStatus(false);
     renderRecent([]);
