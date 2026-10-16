@@ -22,7 +22,7 @@ comes right back.
 - `index.html` – the page: items per order (presets / steppers / random), number of orders, Create; recent orders from ShipHero
 - `api/create-orders.js` – creates the orders via the ShipHero Public API
 - `api/recent.js` – latest training orders, shown on the page
-- `api/reset.js` – clears training totes (restocks bins) and cancels open training orders; `mode: auto` (idle 30+ min only, run on page open) or `all` (Reset button)
+- `api/reset.js` – resets the station. `mode: auto` (run on page open) only touches training orders a picker has started — picked into a tote or locked — and idle 30+ min: clears their totes (units go back to the bins) and cancels them; untouched orders stay. `mode: all` (Reset button) cancels every open training order.
 - `api/catalog.js` / `api/_catalog.js` – the training product list (only these SKUs are allowed)
 - `img/` – front-of-pack images
 
