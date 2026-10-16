@@ -4,12 +4,12 @@
 const SHIPBOTS_ACCOUNT_ID = 'QWNjb3VudDo2OTY4Mw=='; // SHIPBOTS (legacy 69683)
 
 const PRODUCTS = {
-  'SBT-HERSHEY-KS':   { name: "Hershey's Milk Chocolate King Size", price: '2.49', barcode: '03422007', img: '/img/hersheys.jpg' },
-  'SBT-KITKAT':       { name: 'KitKat',                             price: '1.99', barcode: '03424607', img: '/img/kitkat.jpg' },
-  'SBT-BUTTERFINGER': { name: 'Butterfinger',                       price: '1.99', barcode: '099900100873', img: '/img/butterfinger.jpg' },
-  'SBT-BUBBLETAPE':   { name: 'Hubba Bubba Bubble Tape',            price: '2.29', barcode: '022110079806', img: '/img/bubbletape.jpg' },
-  'SBT-MMS-PEANUT':   { name: "Peanut M&M's",                       price: '1.99', barcode: '040000000327', img: '/img/mms.jpg' },
-  'SBT-TRIDENT':      { name: 'Trident White Spearmint Gum',        price: '1.79', barcode: '073390055530', img: '/img/trident.jpg' },
+  'SBT-HERSHEY-KS':   { name: "Hershey's Milk Chocolate King Size", short: "Hershey's", price: '2.49', barcode: '03422007', img: '/img/hersheys.jpg' },
+  'SBT-KITKAT':       { name: 'KitKat',                             short: 'KitKat', price: '1.99', barcode: '03424607', img: '/img/kitkat.jpg' },
+  'SBT-BUTTERFINGER': { name: 'Butterfinger',                       short: 'Butterfinger', price: '1.99', barcode: '099900100873', img: '/img/butterfinger.jpg' },
+  'SBT-BUBBLETAPE':   { name: 'Hubba Bubba Bubble Tape',            short: 'Bubble Tape', price: '2.29', barcode: '022110079806', img: '/img/bubbletape.jpg' },
+  'SBT-MMS-PEANUT':   { name: "Peanut M&M's",                       short: "M&M's", price: '1.99', barcode: '040000000327', img: '/img/mms.jpg' },
+  'SBT-TRIDENT':      { name: 'Trident White Spearmint Gum',        short: 'Trident', price: '1.79', barcode: '073390055530', img: '/img/trident.jpg' },
 };
 
 // Orders ship "to" the Gardena warehouse so a label printed by accident comes right back.
