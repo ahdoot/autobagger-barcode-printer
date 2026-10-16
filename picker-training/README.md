@@ -19,8 +19,9 @@ comes right back.
 
 ## Files
 
-- `index.html` – the page (scenario tickets, random batch, order builder, session log)
+- `index.html` – the page (tap-to-create presets, random batch, build-your-own, recent orders from ShipHero)
 - `api/create-orders.js` – creates the orders via the ShipHero Public API
+- `api/recent.js` – latest training orders, shown on the page
 - `api/catalog.js` / `api/_catalog.js` – the training product list (only these SKUs are allowed)
 - `img/` – front-of-pack images
 
