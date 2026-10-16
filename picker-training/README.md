@@ -19,7 +19,7 @@ comes right back.
 
 ## Files
 
-- `index.html` – the page (tap-to-create presets, random batch, build-your-own, recent orders from ShipHero)
+- `index.html` – the page: items per order (presets / steppers / random), number of orders, Create; recent orders from ShipHero
 - `api/create-orders.js` – creates the orders via the ShipHero Public API
 - `api/recent.js` – latest training orders, shown on the page
 - `api/catalog.js` / `api/_catalog.js` – the training product list (only these SKUs are allowed)

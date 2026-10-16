@@ -1,5 +1,5 @@
 // POST /api/create-orders
-// Body: { pin?: string, orders: [ { lines: [ { sku, qty } ] } ] }
+// Body: { pin?: string, after?: 'TEST-TRAINING-012', orders: [ { lines: [ { sku, qty } ] } ] }
 // Creates pending ShipHero orders in the SHIPBOTS child account for picker training.
 //
 // Env vars (set in Vercel):
@@ -149,9 +149,12 @@ module.exports = async function handler(req, res) {
   }
 
   // Sequential on purpose: keeps us well under ShipHero's credit throttle.
+  // The page sends the last number it received so chunked batches never reuse one,
+  // even if ShipHero's order search hasn't caught up yet.
+  const hint = /^TEST-TRAINING-(\d+)$/.exec(String(body.after || ''));
   let next;
   try {
-    next = Math.max(await highestOrderNumber(token), lastIssued) + 1;
+    next = Math.max(await highestOrderNumber(token), lastIssued, hint ? Number(hint[1]) : 0) + 1;
   } catch (e) {
     return res.status(502).json({ error: e.message });
   }

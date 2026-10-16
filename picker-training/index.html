@@ -8,9 +8,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;800&display=swap">
 <style>
-/* One screen: tap a preset = order created. Build-your-own below. Live list of recent orders. */
+/* Three labeled steps in one card: 1 items in each order, 2 how many orders, 3 create. Recent orders below. */
 :root {
-  --bg: #f4f5f7; --card: #ffffff; --ink: #0f1215; --muted: #6b7380; --line: #e3e6ea; --soft: #eceef2;
+  --bg: #f4f5f7; --card: #ffffff; --ink: #0f1215; --muted: #6b7380; --line: #e3e6ea; --soft: #eef0f3;
   --ok: #15803d; --ok-bg: #dcfce7; --bad: #b91c1c; --bad-bg: #fee2e2; --pend: #a16207; --pend-bg: #fef3c7;
   --font: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -32,20 +32,22 @@
 html, body { margin: 0; }
 body {
   background: var(--bg); color: var(--ink); font: 500 15px/1.4 var(--font);
-  padding-block: max(16px, env(safe-area-inset-top, 0px)) calc(96px + env(safe-area-inset-bottom, 0px));
+  padding-block: max(16px, env(safe-area-inset-top, 0px)) max(40px, env(safe-area-inset-bottom, 0px));
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
   -webkit-tap-highlight-color: transparent;
 }
 img { max-width: 100%; }
 [hidden] { display: none !important; }
-button { font: inherit; color: inherit; cursor: pointer; }
-button:disabled { cursor: default; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; opacity: .5; }
 button:focus-visible, input:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
-.wrap { max-width: 980px; margin: 0 auto; display: grid; gap: 28px; }
+.wrap { max-width: 1040px; margin: 0 auto; display: grid; gap: 24px; }
 
-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 h1 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.01em; }
+.sub { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
 .status { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
 .status i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .status.on i { background: var(--ok); }
@@ -53,260 +55,300 @@ h1 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.01em; }
 .pin { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 .pin input { width: 5.5em; font: 600 15px var(--mono); padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); }
 
-section > h2 { margin: 0 0 10px; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.step { font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+.step b { width: 20px; height: 20px; border-radius: 50%; background: var(--ink); color: var(--bg); font-size: 11px; display: grid; place-items: center; }
 
-/* Preset orders: the whole card is the button */
-.presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
-.q {
-  position: relative; display: grid; gap: 10px; align-content: start; text-align: left;
-  background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; padding-right: 72px; min-height: 92px;
-  transition: border-color .15s, transform .08s;
-}
-.q:hover:not(:disabled) { border-color: var(--ink); }
-.q:active:not(:disabled) { transform: scale(.985); }
-.q:disabled { opacity: .6; }
-.q.done { border-color: var(--ok); }
-.q.err { border-color: var(--bad); }
-.thumbs { display: flex; flex-wrap: wrap; gap: 6px; }
-.thumbs span { position: relative; width: 40px; height: 40px; border-radius: 9px; background: #fff; border: 1px solid var(--line); display: grid; place-items: center; overflow: hidden; }
-.thumbs img { width: 100%; height: 100%; object-fit: contain; padding: 3px; }
-.thumbs b { position: absolute; right: -1px; bottom: -1px; font-size: 10px; font-weight: 800; line-height: 1; padding: 2px 4px; border-radius: 6px 0 8px 0; background: var(--ink); color: var(--bg); }
-.thumbs .dice { background: var(--soft); border-color: transparent; color: var(--ink); }
-.q .lbl { font-weight: 700; font-size: 15px; line-height: 1.25; text-wrap: balance; }
-.q .st { position: absolute; top: 12px; right: 12px; font-size: 12px; font-weight: 700; color: var(--muted); font-family: var(--mono); text-align: right; max-width: 55%; }
-.q.done .st { color: var(--ok); }
-.q.err .st { color: var(--bad); font-family: var(--font); }
-.spin { width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--ink); border-radius: 50%; display: inline-block; vertical-align: -3px; animation: spin .7s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-.strip { grid-column: 1 / -1; grid-template-columns: auto auto 1fr auto; align-items: center; min-height: 0; padding: 10px 14px; padding-right: 14px; cursor: default; }
-.strip:hover { border-color: var(--line); }
-.strip .lbl { margin-right: 8px; }
-.chips { justify-self: end; display: flex; gap: 6px; }
-.chips button { min-width: 44px; height: 36px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); font-weight: 800; }
+/* Composer card */
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: 16px; display: grid; grid-template-columns: 1.4fr 1fr; }
+.panel > div { padding: 18px; min-width: 0; }
+.panel > div + div { border-left: 1px solid var(--line); }
+
+.seg { display: inline-grid; grid-auto-flow: column; background: var(--soft); border-radius: 10px; padding: 3px; margin-bottom: 12px; }
+.seg button { border: 0; background: transparent; border-radius: 8px; padding: 7px 14px; font-weight: 700; color: var(--muted); }
+.seg button.on { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 6px 12px; font-weight: 700; font-size: 13px; }
 .chips button:hover:not(:disabled) { border-color: var(--ink); }
-.chips button:disabled { opacity: .5; }
-.strip .st { position: static; margin-left: 8px; }
+.chips button.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.presets { margin-bottom: 12px; }
+.hint { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
 
-/* Build your own: tap a tile to add one */
-.tiles { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
-.t {
-  position: relative; display: grid; gap: 8px; padding: 10px; text-align: center;
-  background: var(--card); border: 1px solid var(--line); border-radius: 14px; transition: border-color .15s, transform .08s;
-}
-.t:hover { border-color: var(--ink); }
-.t:active { transform: scale(.97); }
-.t.on { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
-.t .pic { aspect-ratio: 1; background: #fff; border-radius: 9px; overflow: hidden; display: grid; place-items: center; }
-.t .pic img { width: 100%; height: 100%; object-fit: contain; padding: 6px; }
-.t .nm { font-size: 13px; font-weight: 700; line-height: 1.2; }
-.t .n { position: absolute; top: 6px; right: 6px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: var(--ink); color: var(--bg); font-size: 12px; font-weight: 800; display: grid; place-items: center; }
-.t .minus { position: absolute; top: 6px; left: 6px; width: 22px; height: 22px; border-radius: 11px; border: 1px solid var(--line); background: var(--card); font-weight: 800; line-height: 1; padding: 0; }
+.plist { display: grid; gap: 6px; }
+.prow { display: grid; grid-template-columns: 44px 1fr auto; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: 12px; padding: 6px 8px 6px 6px; }
+.prow.on { border-color: var(--ink); }
+.prow .pic { width: 44px; height: 44px; border-radius: 8px; background: #fff; border: 1px solid var(--line); display: grid; place-items: center; overflow: hidden; }
+.prow .pic img { width: 100%; height: 100%; object-fit: contain; padding: 3px; }
+.prow .nm { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stp { display: inline-grid; grid-template-columns: 36px 36px 36px; align-items: center; }
+.stp button { height: 36px; border: 1px solid var(--line); background: var(--card); font-weight: 800; font-size: 16px; padding: 0; }
+.stp button:first-child { border-radius: 9px 0 0 9px; }
+.stp button:last-child { border-radius: 0 9px 9px 0; }
+.stp output { text-align: center; font-weight: 800; font-variant-numeric: tabular-nums; }
+.random-note { border: 1px dashed var(--line); border-radius: 12px; padding: 14px; color: var(--muted); font-size: 14px; }
 
-/* Sticky bar for the custom order */
-.bar {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
-  padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
-  background: var(--card); border-top: 1px solid var(--line);
-}
-.bar .in { max-width: 980px; margin: 0 auto; display: flex; align-items: center; gap: 10px; }
-.bar .sum { flex: 1; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.btn { border: 0; border-radius: 12px; padding: 12px 18px; font-weight: 800; background: var(--ink); color: var(--bg); min-height: 44px; }
-.btn:disabled { opacity: .5; }
+.num { display: grid; grid-template-columns: 48px 1fr 48px; margin-bottom: 10px; }
+.num button { height: 52px; border: 1px solid var(--line); background: var(--card); font-size: 22px; font-weight: 800; padding: 0; }
+.num button:first-child { border-radius: 12px 0 0 12px; }
+.num button:last-child { border-radius: 0 12px 12px 0; }
+.num input { height: 52px; border: 1px solid var(--line); border-left: 0; border-right: 0; background: var(--card); text-align: center; font-size: 24px; font-weight: 800; width: 100%; min-width: 0; -moz-appearance: textfield; }
+.num input::-webkit-outer-spin-button, .num input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+.summary { margin: 18px 0 10px; font-size: 14px; color: var(--muted); min-height: 1.4em; }
+.btn { width: 100%; border: 0; border-radius: 12px; padding: 14px 18px; font-weight: 800; font-size: 16px; background: var(--ink); color: var(--bg); min-height: 52px; }
 .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.result { margin-top: 10px; font-size: 13px; font-weight: 700; min-height: 1.3em; }
+.result.ok { color: var(--ok); }
+.result.bad { color: var(--bad); }
+.bar { height: 6px; background: var(--soft); border-radius: 3px; overflow: hidden; margin-top: 10px; }
+.bar i { display: block; height: 100%; width: 0; background: var(--ink); transition: width .2s; }
+.spin { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.35); border-top-color: var(--bg); border-radius: 50%; display: inline-block; vertical-align: -2px; margin-right: 6px; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* Recent orders */
 .list { display: grid; gap: 6px; }
 .row { display: grid; grid-template-columns: auto 1fr auto auto; grid-template-areas: "num it pill link"; align-items: center; gap: 10px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; }
-.row .num { grid-area: num; font: 800 14px var(--mono); letter-spacing: .02em; }
+.row.new { border-color: var(--ok); }
+.row .num { grid-area: num; font: 800 14px var(--mono); letter-spacing: .02em; white-space: nowrap; }
 .row .it { grid-area: it; color: var(--muted); font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pill { grid-area: pill; justify-self: start; font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; background: var(--soft); color: var(--muted); }
-.pill.pending { background: var(--pend-bg); color: var(--pend); }
-.pill.fulfilled { background: var(--ok-bg); color: var(--ok); }
+.pill.pending, .pill.training { background: var(--pend-bg); color: var(--pend); }
+.pill.fulfilled, .pill.new { background: var(--ok-bg); color: var(--ok); }
 .pill.canceled { background: var(--bad-bg); color: var(--bad); }
 .row a { grid-area: link; color: var(--ink); font-weight: 800; text-decoration: none; font-size: 13px; }
 .row a:hover { text-decoration: underline; }
 .empty { color: var(--muted); font-size: 14px; }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); z-index: 6; background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 999px; font-weight: 700; font-size: 14px; max-width: calc(100% - 32px); box-shadow: 0 8px 24px rgba(0,0,0,.18); }
 
-.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(76px + env(safe-area-inset-bottom, 0px)); z-index: 6; background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 999px; font-weight: 700; font-size: 14px; max-width: calc(100% - 32px); box-shadow: 0 8px 24px rgba(0,0,0,.18); }
-
-@media (max-width: 640px) {
-  .presets { grid-template-columns: repeat(2, 1fr); }
-  .q { padding-right: 14px; }
-  .q .st { position: static; max-width: none; text-align: left; }
-  .strip { grid-template-columns: auto auto 1fr auto; }
-  .strip .st { display: none; }
-  .tiles { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 760px) {
+  .panel { grid-template-columns: 1fr; }
+  .panel > div + div { border-left: 0; border-top: 1px solid var(--line); }
   .row { grid-template-columns: 1fr auto auto; grid-template-areas: "num pill link" "it it it"; }
 }
-@media (prefers-reduced-motion: reduce) { .spin { animation: none; } .q, .t { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } .bar i { transition: none; } }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <h1>Picker Training</h1>
+    <div>
+      <h1>Picker Training</h1>
+      <p class="sub">Choose what goes in each order, how many orders, then Create.</p>
+    </div>
     <label class="pin" id="pinWrap" hidden>PIN <input id="pin" type="password" inputmode="numeric" autocomplete="off"></label>
     <span class="status" id="status"><i></i><span>ShipHero</span></span>
   </header>
 
-  <section>
-    <h2>Tap to create</h2>
-    <div class="presets" id="presets"></div>
-  </section>
+  <div class="panel">
+    <div>
+      <p class="step"><b>1</b> Items in each order</p>
+      <div class="seg" role="tablist">
+        <button id="modePick" class="on" type="button">Choose items</button>
+        <button id="modeRandom" type="button">Random mix</button>
+      </div>
+      <div id="pickArea">
+        <p class="hint">Presets:</p>
+        <div class="chips presets" id="presets"></div>
+        <div class="plist" id="plist"></div>
+      </div>
+      <div id="randomArea" class="random-note" hidden>Each order gets 1–4 random products, quantity 1–2 each.</div>
+    </div>
+    <div>
+      <p class="step"><b>2</b> How many orders</p>
+      <div class="num">
+        <button type="button" id="dec" aria-label="Fewer">−</button>
+        <input id="count" type="number" inputmode="numeric" min="1" max="50" value="1" aria-label="Number of orders">
+        <button type="button" id="inc" aria-label="More">+</button>
+      </div>
+      <div class="chips" id="countChips">
+        <button type="button" data-n="1">1</button><button type="button" data-n="5">5</button><button type="button" data-n="10">10</button><button type="button" data-n="20">20</button>
+      </div>
 
-  <section>
-    <h2>Build your own</h2>
-    <div class="tiles" id="tiles"></div>
-  </section>
-
-  <section>
-    <h2>Recent</h2>
-    <div class="list" id="recent"><div class="empty" id="recentEmpty">Loading…</div></div>
-  </section>
-</div>
-
-<div class="bar" id="bar" hidden>
-  <div class="in">
-    <span class="sum" id="sum"></span>
-    <button class="btn ghost" id="clear">Clear</button>
-    <button class="btn" id="go">Create order</button>
+      <p class="step" style="margin-top:22px"><b>3</b> Create</p>
+      <div class="summary" id="summary"></div>
+      <button class="btn" id="go" type="button">Create 1 order</button>
+      <div class="bar" id="bar" hidden><i id="barFill"></i></div>
+      <div class="result" id="result"></div>
+    </div>
   </div>
+
+  <section>
+    <p class="step">Recent orders</p>
+    <div class="list" id="recent"><div class="empty">Loading…</div></div>
+  </section>
 </div>
 <div class="toast" id="toast" role="status" hidden></div>
 
 <script>
 const PRESETS = [
-  { lines: [['SBT-MMS-PEANUT', 1], ['SBT-KITKAT', 1]] },
-  { lines: [['SBT-TRIDENT', 1]] },
-  { lines: [['SBT-BUTTERFINGER', 1], ['SBT-KITKAT', 1], ['SBT-HERSHEY-KS', 1]] },
-  { lines: [['SBT-BUBBLETAPE', 2]] },
-  { lines: [['SBT-HERSHEY-KS', 2], ['SBT-MMS-PEANUT', 3], ['SBT-TRIDENT', 1]] },
-  { lines: [['SBT-HERSHEY-KS', 1], ['SBT-KITKAT', 1], ['SBT-BUTTERFINGER', 1], ['SBT-BUBBLETAPE', 1], ['SBT-MMS-PEANUT', 1], ['SBT-TRIDENT', 1]], label: 'One of each' },
+  { label: "M&M's + KitKat", lines: { 'SBT-MMS-PEANUT': 1, 'SBT-KITKAT': 1 } },
+  { label: 'Trident', lines: { 'SBT-TRIDENT': 1 } },
+  { label: "Butterfinger + KitKat + Hershey's", lines: { 'SBT-BUTTERFINGER': 1, 'SBT-KITKAT': 1, 'SBT-HERSHEY-KS': 1 } },
+  { label: 'Bubble Tape ×2', lines: { 'SBT-BUBBLETAPE': 2 } },
+  { label: "Hershey's ×2 + M&M's ×3 + Trident", lines: { 'SBT-HERSHEY-KS': 2, 'SBT-MMS-PEANUT': 3, 'SBT-TRIDENT': 1 } },
+  { label: 'One of each', lines: { 'SBT-HERSHEY-KS': 1, 'SBT-KITKAT': 1, 'SBT-BUTTERFINGER': 1, 'SBT-BUBBLETAPE': 1, 'SBT-MMS-PEANUT': 1, 'SBT-TRIDENT': 1 } },
 ];
-const DICE = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>';
+const MAX_ORDERS = 50, CHUNK = 5, MAX_QTY = 5;
 
 let P = {};
-const cart = {};
+let mode = 'pick';
+const qty = {};
+let lastNumber = '';
+let busy = false;
+
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const short = (sku) => (P[sku] && P[sku].short) || sku;
-const describe = (lines) => lines.map((l) => short(l.sku) + (l.qty > 1 ? ' ×' + l.qty : '')).join(' + ');
+const describe = (lines) => lines.map((l) => short(l.sku) + (l.qty > 1 ? ' ×' + l.qty : '')).join(', ');
+const chosen = () => Object.keys(P).filter((s) => qty[s] > 0).map((sku) => ({ sku, qty: qty[sku] }));
+const count = () => Math.min(MAX_ORDERS, Math.max(1, parseInt($('count').value, 10) || 1));
+const plural = (n) => n === 1 ? '1 order' : n + ' orders';
 
 function toast(msg) {
   const t = $('toast'); t.textContent = msg; t.hidden = false;
-  clearTimeout(toast.h); toast.h = setTimeout(() => { t.hidden = true; }, 3000);
+  clearTimeout(toast.h); toast.h = setTimeout(() => { t.hidden = true; }, 3500);
 }
 function savePin() { try { localStorage.setItem('pt-pin', $('pin').value); } catch (e) {} }
 function loadPin() { try { $('pin').value = localStorage.getItem('pt-pin') || ''; } catch (e) {} }
 
-function thumbs(lines) {
-  return '<span class="thumbs">' + lines.map(([sku, q]) =>
-    `<span><img src="${P[sku].img}" alt="">${q > 1 ? `<b>×${q}</b>` : ''}</span>`).join('') + '</span>';
-}
-
 function renderPresets() {
-  $('presets').innerHTML = PRESETS.map((p, i) => {
-    const label = p.label || describe(p.lines.map(([sku, qty]) => ({ sku, qty })));
-    return `<button class="q" data-i="${i}">${thumbs(p.lines)}<span class="lbl">${esc(label)}</span><span class="st"></span></button>`;
-  }).join('') + `<div class="q strip"><span class="thumbs"><span class="dice">${DICE}</span></span><span class="lbl">Random</span><span class="st"></span><span class="chips"><button data-r="1">1</button><button data-r="5">5</button><button data-r="10">10</button></span></div>`;
+  $('presets').innerHTML = PRESETS.map((p, i) => `<button type="button" data-p="${i}">${esc(p.label)}</button>`).join('');
 }
-
-function renderTiles() {
-  $('tiles').innerHTML = Object.entries(P).map(([sku, p]) => `
-    <button class="t${cart[sku] ? ' on' : ''}" data-sku="${sku}" aria-label="Add ${esc(p.short)}">
+function renderList() {
+  $('plist').innerHTML = Object.entries(P).map(([sku, p]) => `
+    <div class="prow${qty[sku] ? ' on' : ''}" data-sku="${sku}">
       <span class="pic"><img src="${p.img}" alt=""></span>
-      <span class="nm">${esc(p.short)}</span>
-      ${cart[sku] ? `<span class="n">${cart[sku]}</span><span class="minus" data-minus="${sku}" role="button" aria-label="Remove one">−</span>` : ''}
-    </button>`).join('');
-  const lines = Object.entries(cart).filter(([, q]) => q > 0).map(([sku, qty]) => ({ sku, qty }));
-  $('bar').hidden = !lines.length;
-  $('sum').textContent = lines.length ? describe(lines) : '';
+      <span class="nm">${esc(p.name)}</span>
+      <span class="stp">
+        <button type="button" data-d="-1" aria-label="One less ${esc(p.short)}">−</button>
+        <output>${qty[sku] || 0}</output>
+        <button type="button" data-d="1" aria-label="One more ${esc(p.short)}">+</button>
+      </span>
+    </div>`).join('');
+  markPreset();
+  renderSummary();
 }
+function markPreset() {
+  const cur = JSON.stringify(chosen().map((l) => [l.sku, l.qty]).sort());
+  document.querySelectorAll('#presets button').forEach((b) => {
+    const p = PRESETS[b.dataset.p];
+    const key = JSON.stringify(Object.entries(p.lines).sort());
+    b.classList.toggle('on', mode === 'pick' && key === cur);
+  });
+}
+function renderSummary() {
+  const n = count();
+  const lines = chosen();
+  document.querySelectorAll('#countChips button').forEach((b) => b.classList.toggle('on', Number(b.dataset.n) === n));
+  const ready = mode === 'random' || lines.length > 0;
+  $('summary').textContent = mode === 'random'
+    ? `${plural(n)}, each with a random mix`
+    : lines.length ? `${plural(n)}, each with ${describe(lines)}` : 'Pick at least one item above.';
+  $('go').textContent = busy ? $('go').textContent : `Create ${plural(n)}`;
+  $('go').disabled = busy || !ready;
+}
+function setMode(m) {
+  mode = m;
+  $('modePick').classList.toggle('on', m === 'pick');
+  $('modeRandom').classList.toggle('on', m === 'random');
+  $('pickArea').hidden = m !== 'pick';
+  $('randomArea').hidden = m !== 'random';
+  renderSummary();
+}
+function setCount(n) { $('count').value = Math.min(MAX_ORDERS, Math.max(1, n)); renderSummary(); }
 
 function pill(status) {
   const s = String(status || '').toLowerCase();
-  const cls = s.includes('cancel') ? 'canceled' : s === 'fulfilled' ? 'fulfilled' : s === 'pending' ? 'pending' : '';
+  const cls = s.includes('cancel') ? 'canceled' : ['fulfilled', 'pending', 'training', 'new'].includes(s) ? s : '';
   return `<span class="pill ${cls}">${esc(s || '—')}</span>`;
 }
-function rowHtml(o) {
+function rowHtml(o, isNew) {
   const link = o.id ? `<a href="https://app.shiphero.com/dashboard/orders/details/${o.id}" target="_blank" rel="noopener">Open ↗</a>` : '<span></span>';
-  return `<div class="row"><span class="num">${esc(o.number)}</span><span class="it">${esc(describe(o.lines))}</span>${pill(o.status)}${link}</div>`;
+  return `<div class="row${isNew ? ' new' : ''}"><span class="num">${esc(o.number)}</span><span class="it">${esc(describe(o.lines))}</span>${pill(isNew ? 'new' : o.status)}${link}</div>`;
 }
 function renderRecent(orders) {
-  const el = $('recent');
-  el.innerHTML = orders.length ? orders.slice(0, 10).map(rowHtml).join('') : '<div class="empty">No orders yet.</div>';
+  $('recent').innerHTML = orders.length ? orders.slice(0, 12).map((o) => rowHtml(o, false)).join('') : '<div class="empty">No orders yet.</div>';
 }
 function prependRecent(o) {
   const el = $('recent');
   if (el.querySelector('.empty')) el.innerHTML = '';
-  el.insertAdjacentHTML('afterbegin', rowHtml(o));
-  while (el.children.length > 10) el.lastElementChild.remove();
+  el.insertAdjacentHTML('afterbegin', rowHtml(o, true));
+  while (el.children.length > 12) el.lastElementChild.remove();
 }
 function setStatus(on) {
   const s = $('status');
   s.className = 'status ' + (on ? 'on' : 'off');
   s.lastElementChild.textContent = on ? 'ShipHero' : 'ShipHero offline';
 }
-
 function randomOrder() {
   const skus = Object.keys(P).sort(() => Math.random() - 0.5);
   const n = 1 + Math.floor(Math.random() * 4);
   return { lines: skus.slice(0, n).map((sku) => ({ sku, qty: Math.random() < 0.75 ? 1 : 2 })) };
 }
 
-let busy = false;
-async function create(orders, btn) {
-  if (busy) return false;
+async function createAll() {
+  if (busy) return;
+  const total = count();
+  const lines = chosen();
+  const orders = mode === 'random'
+    ? Array.from({ length: total }, randomOrder)
+    : Array.from({ length: total }, () => ({ lines }));
   busy = true;
-  document.querySelectorAll('button.q, .chips button, #go').forEach((b) => { b.disabled = true; });
-  const st = btn && btn.querySelector('.st');
-  if (st) { btn.classList.remove('done', 'err'); st.innerHTML = '<span class="spin"></span>'; }
+  const go = $('go'), res = $('result'), bar = $('bar'), fill = $('barFill');
+  res.className = 'result'; res.textContent = '';
+  bar.hidden = false; fill.style.width = '0%';
+  go.disabled = true;
+  const made = [];
+  let failed = 0, error = '';
   try {
-    const r = await fetch('/api/create-orders', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: $('pin').value, orders }),
-    });
-    const body = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(body.error || `Error ${r.status}`);
-    const ok = body.results.filter((x) => x.ok);
-    body.results.slice().reverse().forEach((x) => { if (x.ok) prependRecent({ number: x.order_number, id: x.legacy_id, status: 'pending', lines: x.lines }); });
-    if (st) {
-      if (ok.length === body.results.length) { btn.classList.add('done'); st.textContent = ok.length === 1 ? ok[0].order_number : `${ok.length} created`; }
-      else { btn.classList.add('err'); st.textContent = `${ok.length}/${body.results.length} created`; }
-      setTimeout(() => { btn.classList.remove('done', 'err'); st.textContent = ''; }, 4000);
+    for (let i = 0; i < orders.length; i += CHUNK) {
+      go.innerHTML = `<span class="spin"></span>Creating ${Math.min(i + CHUNK, orders.length)} / ${orders.length}…`;
+      const r = await fetch('/api/create-orders', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: $('pin').value, after: lastNumber, orders: orders.slice(i, i + CHUNK) }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || `Error ${r.status}`);
+      for (const x of body.results) {
+        if (x.ok) { made.push(x); lastNumber = x.order_number; prependRecent({ number: x.order_number, id: x.legacy_id, lines: x.lines }); }
+        else { failed++; error = x.error || error; }
+      }
+      fill.style.width = Math.round(((made.length + failed) / orders.length) * 100) + '%';
     }
-    if (!ok.length) toast(body.results[0].error || 'Not created');
-    else if (!st) toast(ok.length === 1 ? ok[0].order_number + ' created' : `${ok.length} orders created`);
-    setStatus(true);
-    return ok.length > 0;
   } catch (e) {
-    if (st) { btn.classList.add('err'); st.textContent = e.message; }
-    else toast(e.message);
-    return false;
-  } finally {
-    busy = false;
-    document.querySelectorAll('button.q, .chips button, #go').forEach((b) => { b.disabled = false; });
+    error = e.message;
   }
+  busy = false;
+  bar.hidden = true;
+  if (made.length && !failed && !error) {
+    res.className = 'result ok';
+    res.textContent = made.length === 1 ? `Created ${made[0].order_number}` : `Created ${made.length} orders: ${made[0].order_number} → ${made[made.length - 1].order_number}`;
+    setStatus(true);
+  } else if (made.length) {
+    res.className = 'result bad';
+    res.textContent = `Created ${made.length} of ${orders.length}. ${error}`;
+  } else {
+    res.className = 'result bad';
+    res.textContent = error || 'Nothing was created.';
+  }
+  renderSummary();
 }
 
 document.addEventListener('click', (e) => {
-  const r = e.target.closest('[data-r]');
-  if (r) return create(Array.from({ length: Number(r.dataset.r) }, randomOrder), r.closest('.strip'));
-  const q = e.target.closest('button.q');
-  if (q) {
-    const p = PRESETS[q.dataset.i];
-    return create([{ lines: p.lines.map(([sku, qty]) => ({ sku, qty })) }], q);
-  }
-  const minus = e.target.closest('[data-minus]');
-  if (minus) { e.stopPropagation(); const s = minus.dataset.minus; cart[s] = Math.max(0, (cart[s] || 0) - 1); return renderTiles(); }
-  const t = e.target.closest('.t');
-  if (t) { const s = t.dataset.sku; cart[s] = Math.min(5, (cart[s] || 0) + 1); return renderTiles(); }
+  const pre = e.target.closest('[data-p]');
+  if (pre) { Object.keys(qty).forEach((k) => delete qty[k]); Object.assign(qty, PRESETS[pre.dataset.p].lines); return renderList(); }
+  const st = e.target.closest('[data-d]');
+  if (st) { const sku = st.closest('[data-sku]').dataset.sku; qty[sku] = Math.max(0, Math.min(MAX_QTY, (qty[sku] || 0) + Number(st.dataset.d))); return renderList(); }
+  const cc = e.target.closest('#countChips [data-n]');
+  if (cc) return setCount(Number(cc.dataset.n));
 });
-$('clear').addEventListener('click', () => { Object.keys(cart).forEach((k) => delete cart[k]); renderTiles(); });
-$('go').addEventListener('click', async () => {
-  const lines = Object.entries(cart).filter(([, q]) => q > 0).map(([sku, qty]) => ({ sku, qty }));
-  if (await create([{ lines }])) { Object.keys(cart).forEach((k) => delete cart[k]); renderTiles(); }
-});
+$('modePick').addEventListener('click', () => setMode('pick'));
+$('modeRandom').addEventListener('click', () => setMode('random'));
+$('dec').addEventListener('click', () => setCount(count() - 1));
+$('inc').addEventListener('click', () => setCount(count() + 1));
+$('count').addEventListener('input', renderSummary);
+$('count').addEventListener('change', () => setCount(count()));
+$('go').addEventListener('click', createAll);
 $('pin').addEventListener('input', savePin);
 
 (async () => {
@@ -316,15 +358,18 @@ $('pin').addEventListener('input', savePin);
     $('pinWrap').hidden = !cat.pinRequired;
     loadPin();
     renderPresets();
-    renderTiles();
+    Object.assign(qty, PRESETS[0].lines);
+    renderList();
   } catch (e) {
-    toast('Could not load products. Refresh.');
+    toast('Could not load the product list. Refresh.');
     return;
   }
   try {
     const rec = await fetch('/api/recent').then((r) => r.json());
     setStatus(Boolean(rec.ok));
     renderRecent(rec.orders || []);
+    const top = (rec.orders || []).map((o) => o.number).find((n) => /^TEST-TRAINING-\d+$/.test(n));
+    if (top) lastNumber = top;
   } catch (e) {
     setStatus(false);
     renderRecent([]);
