@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 # Version of this release. Bump on every release - deployed stations compare
 # against the copy on the office share (settings: updateSource) and offer to
 # self-update when the shared copy is newer.
-$script:AppVersion = '2.7.1'
+$script:AppVersion = '2.7.2'
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -95,10 +95,19 @@ public static class Code128B
 }
 "@ -ErrorAction SilentlyContinue
 
-# borderless companion window that never steals keyboard focus from the scanner
+# borderless companion window that never steals keyboard focus from the scanner.
+# WS_EX_NOACTIVATE makes it impossible for Windows to activate it - mouse clicks
+# still arrive (for the zoom popup), but keyboard focus always stays put.
 Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition @"
 public class NoActivateForm : System.Windows.Forms.Form {
     protected override bool ShowWithoutActivation { get { return true; } }
+    protected override System.Windows.Forms.CreateParams CreateParams {
+        get {
+            var cp = base.CreateParams;
+            cp.ExStyle |= 0x08000000; // WS_EX_NOACTIVATE
+            return cp;
+        }
+    }
 }
 "@ -ErrorAction SilentlyContinue
 
@@ -1241,9 +1250,15 @@ function Update-SidePanel {
         $gap = $form.Left - $wa.Left - 14
         if ($gap -lt 180 -or -not $script:SideHasImage) { if ($sideForm.Visible) { $sideForm.Hide() }; return }
         # claim the FULL working-area height, not just the app window's height
+        $mainWasActive = [object]::ReferenceEquals([System.Windows.Forms.Form]::ActiveForm, $form)
         $sideForm.SetBounds($wa.Left + 6, ($wa.Top + 6), $gap, ($wa.Height - 12))
         if (-not $sideForm.Visible) { $sideForm.Show() }
         $sidePic.Invalidate()
+        # watchdog: if showing the panel stole focus anyway, take it straight back
+        if ($mainWasActive -and -not [object]::ReferenceEquals([System.Windows.Forms.Form]::ActiveForm, $form)) {
+            $form.Activate()
+            $txtScan.Focus()
+        }
     } catch { }
 }
 
